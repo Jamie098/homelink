@@ -10,7 +10,6 @@ import (
 	"log"
 	"net"
 	"sync"
-	"time"
 )
 
 // HomeLinkService manages the entire HomeLink protocol
@@ -66,23 +65,11 @@ func (s *HomeLinkService) Start() error {
 	go s.sendHeartbeats()
 	go s.sendPeriodicAnnouncements()
 
+	// Request other devices to announce themselves to us
+	s.requestDiscovery()
+
 	// Announce ourselves to the network
 	s.announceDevice()
-
-	// Request other devices to announce themselves to us
-	// Small delay to ensure our listeners are ready, then send multiple discovery requests
-	// with increasing delays to catch devices that might be starting up
-	go func() {
-		time.Sleep(1 * time.Second)
-		s.requestDiscovery()
-
-		// Send additional discovery requests with exponential backoff
-		delays := []time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second}
-		for _, delay := range delays {
-			time.Sleep(delay)
-			s.requestDiscovery()
-		}
-	}()
 
 	log.Printf("HomeLink Service started successfully")
 	return nil
