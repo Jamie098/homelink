@@ -8,4 +8,8 @@ FROM alpine:latest
 RUN apk --no-cache add ca-certificates
 WORKDIR /root/
 COPY --from=builder /app/homelink .
+
+# Expose HomeLink protocol port and API port
+EXPOSE 8080 8081
+
 CMD ["./homelink"]
