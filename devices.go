@@ -44,7 +44,6 @@ func (s *HomeLinkService) handleDeviceAnnouncement(msg *Message, addr *net.UDPAd
 	}
 
 	s.devices[device.ID] = device
-	log.Printf("Device registered: %s (%s) with capabilities: %v", device.Name, device.ID, device.Capabilities)
 }
 
 // handleDiscoveryRequest responds to discovery requests from new devices

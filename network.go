@@ -70,7 +70,6 @@ func (s *HomeLinkService) listenForMessages() {
 				continue
 			}
 
-			log.Printf("Received %d bytes from %s", n, addr.String())
 			s.handleMessage(buffer[:n], addr)
 		}
 	}
@@ -88,8 +87,6 @@ func (s *HomeLinkService) handleMessage(data []byte, addr *net.UDPAddr) {
 	if msg.DeviceID == s.deviceID {
 		return
 	}
-
-	log.Printf("Received %s from %s", msg.Type, msg.DeviceID)
 
 	switch msg.Type {
 	case MSG_DEVICE_ANNOUNCEMENT:
