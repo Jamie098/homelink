@@ -26,6 +26,7 @@ type MessageType string
 
 const (
 	MSG_DEVICE_ANNOUNCEMENT MessageType = "device_announcement"
+	MSG_DISCOVERY_REQUEST   MessageType = "discovery_request"
 	MSG_SUBSCRIBE           MessageType = "subscribe"
 	MSG_EVENT               MessageType = "event"
 	MSG_HEARTBEAT           MessageType = "heartbeat"
@@ -115,9 +116,25 @@ func (s *HomeLinkService) Start() error {
 	go s.listenForMessages()
 	go s.processEvents()
 	go s.sendHeartbeats()
+	go s.sendPeriodicAnnouncements()
 
 	// Announce ourselves to the network
 	s.announceDevice()
+
+	// Request other devices to announce themselves to us
+	// Small delay to ensure our listeners are ready, then send multiple discovery requests
+	// with increasing delays to catch devices that might be starting up
+	go func() {
+		time.Sleep(1 * time.Second)
+		s.requestDiscovery()
+
+		// Send additional discovery requests with exponential backoff
+		delays := []time.Duration{2 * time.Second, 5 * time.Second, 10 * time.Second}
+		for _, delay := range delays {
+			time.Sleep(delay)
+			s.requestDiscovery()
+		}
+	}()
 
 	log.Printf("HomeLink Service started successfully")
 	return nil
@@ -206,6 +223,8 @@ func (s *HomeLinkService) handleMessage(data []byte, addr *net.UDPAddr) {
 	switch msg.Type {
 	case MSG_DEVICE_ANNOUNCEMENT:
 		s.handleDeviceAnnouncement(&msg, addr)
+	case MSG_DISCOVERY_REQUEST:
+		s.handleDiscoveryRequest(&msg, addr)
 	case MSG_SUBSCRIBE:
 		s.handleSubscription(&msg)
 	case MSG_EVENT:
@@ -251,6 +270,14 @@ func (s *HomeLinkService) handleDeviceAnnouncement(msg *Message, addr *net.UDPAd
 
 	s.devices[device.ID] = device
 	log.Printf("Device registered: %s (%s) with capabilities: %v", device.Name, device.ID, device.Capabilities)
+}
+
+// handleDiscoveryRequest responds to discovery requests from new devices
+func (s *HomeLinkService) handleDiscoveryRequest(msg *Message, addr *net.UDPAddr) {
+	log.Printf("Received discovery request from %s, announcing ourselves", msg.DeviceID)
+	// Small random delay to avoid network congestion when multiple devices respond
+	time.Sleep(time.Duration(time.Now().UnixNano()%100) * time.Millisecond)
+	s.announceDevice()
 }
 
 // handleSubscription processes subscription requests
@@ -313,6 +340,20 @@ func (s *HomeLinkService) announceDevice() {
 
 	s.broadcastMessage(msg)
 	log.Printf("Announced device: %s", s.deviceName)
+}
+
+// requestDiscovery asks other devices on the network to announce themselves
+func (s *HomeLinkService) requestDiscovery() {
+	msg := Message{
+		Type:      MSG_DISCOVERY_REQUEST,
+		Version:   PROTOCOL_VERSION,
+		Timestamp: time.Now().Unix(),
+		DeviceID:  s.deviceID,
+		Data:      nil,
+	}
+
+	s.broadcastMessage(msg)
+	log.Printf("Sent discovery request to find other devices")
 }
 
 // broadcastMessage sends a message to all HomeLink services on the network
@@ -405,6 +446,22 @@ func (s *HomeLinkService) sendHeartbeats() {
 	}
 }
 
+// sendPeriodicAnnouncements re-announces our device periodically for better discovery
+func (s *HomeLinkService) sendPeriodicAnnouncements() {
+	// Announce ourselves every 2 minutes to ensure new devices can find us
+	ticker := time.NewTicker(2 * time.Minute)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-s.stopChan:
+			return
+		case <-ticker.C:
+			s.announceDevice()
+		}
+	}
+}
+
 // GetDevices returns all known devices
 func (s *HomeLinkService) GetDevices() map[string]*Device {
 	s.mutex.RLock()
@@ -430,6 +487,40 @@ func (s *HomeLinkService) Subscribe(eventTypes []string) {
 	}
 	s.broadcastMessage(msg)
 	log.Printf("Subscribed to events: %v", eventTypes)
+}
+
+// TriggerDiscovery manually triggers device discovery (useful for debugging)
+func (s *HomeLinkService) TriggerDiscovery() {
+	log.Printf("Manually triggering device discovery...")
+	s.announceDevice()
+	time.Sleep(100 * time.Millisecond) // Small delay
+	s.requestDiscovery()
+}
+
+// GetDiscoveryStats returns statistics about device discovery (useful for debugging)
+func (s *HomeLinkService) GetDiscoveryStats() map[string]interface{} {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	stats := map[string]interface{}{
+		"total_devices":      len(s.devices),
+		"device_count":       len(s.devices),
+		"subscription_count": len(s.subscriptions),
+		"devices":            make([]map[string]interface{}, 0, len(s.devices)),
+	}
+
+	for _, device := range s.devices {
+		deviceInfo := map[string]interface{}{
+			"id":           device.ID,
+			"name":         device.Name,
+			"capabilities": device.Capabilities,
+			"last_seen":    device.LastSeen.Format(time.RFC3339),
+			"address":      device.Address.String(),
+		}
+		stats["devices"] = append(stats["devices"].([]map[string]interface{}), deviceInfo)
+	}
+
+	return stats
 }
 
 // Stop gracefully shuts down the HomeLink service

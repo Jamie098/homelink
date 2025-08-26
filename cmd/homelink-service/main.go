@@ -80,11 +80,19 @@ func startHTTPAPI(service *homelink.HomeLinkService, port string) {
 	http.HandleFunc("/subscribe", func(w http.ResponseWriter, r *http.Request) {
 		subscribeHandler(w, r, service)
 	})
+	http.HandleFunc("/discovery", func(w http.ResponseWriter, r *http.Request) {
+		discoveryHandler(w, r, service)
+	})
+	http.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
+		statsHandler(w, r, service)
+	})
 
 	log.Printf("HTTP API server starting on port %s", port)
 	log.Printf("  POST /publish    - Publish events")
 	log.Printf("  GET  /devices    - List discovered devices")
 	log.Printf("  POST /subscribe  - Subscribe to event types")
+	log.Printf("  POST /discovery  - Trigger device discovery")
+	log.Printf("  GET  /stats      - Discovery statistics")
 	log.Printf("  GET  /health     - Health check")
 
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
@@ -144,6 +152,16 @@ func rootHandler(w http.ResponseWriter, r *http.Request) {
         <p><span class="method">GET</span> <code>/health</code> - Health check</p>
     </div>
     
+    <div class="endpoint">
+        <p><span class="method">POST</span> <code>/discovery</code> - Trigger device discovery</p>
+        <p><small>Manually trigger device discovery to find new devices on the network</small></p>
+    </div>
+    
+    <div class="endpoint">
+        <p><span class="method">GET</span> <code>/stats</code> - Get discovery statistics</p>
+        <p><small>View detailed information about discovered devices and network statistics</small></p>
+    </div>
+    
     <h2>Example Usage with curl</h2>
     <pre># Publish a motion detection event
 curl -X POST http://localhost:8081/publish \
@@ -160,7 +178,13 @@ curl -X POST http://localhost:8081/subscribe \
   -d '{"event_types": ["motion_detected", "person_detected"]}'
 
 # Get discovered devices
-curl http://localhost:8081/devices</pre>
+curl http://localhost:8081/devices
+
+# Trigger device discovery
+curl -X POST http://localhost:8081/discovery
+
+# Get discovery statistics
+curl http://localhost:8081/stats</pre>
 </body>
 </html>`
 	w.Write([]byte(html))
@@ -295,6 +319,53 @@ func subscribeHandler(w http.ResponseWriter, r *http.Request, service *homelink.
 	json.NewEncoder(w).Encode(APIResponse{
 		Success: true,
 		Message: fmt.Sprintf("Subscribed to %d event types", len(subReq.EventTypes)),
+	})
+}
+
+// discoveryHandler triggers device discovery
+func discoveryHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Only POST method allowed",
+		})
+		return
+	}
+
+	// Trigger discovery
+	service.TriggerDiscovery()
+
+	log.Println("Manual device discovery triggered")
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(APIResponse{
+		Success: true,
+		Message: "Device discovery triggered",
+	})
+}
+
+// statsHandler returns discovery statistics
+func statsHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Only GET method allowed",
+		})
+		return
+	}
+
+	stats := service.GetDiscoveryStats()
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"stats":   stats,
 	})
 }
 

@@ -21,6 +21,8 @@ func main() {
 	fmt.Println("  event <type> <description> - Send an event")
 	fmt.Println("  devices - List discovered devices")
 	fmt.Println("  subscribe <event_types> - Subscribe to events (comma separated)")
+	fmt.Println("  discover - Trigger device discovery")
+	fmt.Println("  stats - Show discovery statistics")
 	fmt.Println("  quit - Exit")
 	fmt.Println()
 
@@ -124,6 +126,39 @@ func main() {
 
 			service.Subscribe(eventTypes)
 			fmt.Printf("Subscribed to: %v\n", eventTypes)
+
+		case "discover":
+			if service == nil {
+				fmt.Println("Please start a device first using 'start <device_name>'")
+				continue
+			}
+
+			service.TriggerDiscovery()
+			fmt.Println("Device discovery triggered")
+
+		case "stats":
+			if service == nil {
+				fmt.Println("Please start a device first using 'start <device_name>'")
+				continue
+			}
+
+			stats := service.GetDiscoveryStats()
+			fmt.Printf("Discovery Statistics:\n")
+			fmt.Printf("  Total devices: %v\n", stats["total_devices"])
+			fmt.Printf("  Subscriptions: %v\n", stats["subscription_count"])
+			fmt.Printf("  Devices:\n")
+
+			devices := stats["devices"].([]map[string]interface{})
+			if len(devices) == 0 {
+				fmt.Printf("    (none discovered)\n")
+			} else {
+				for _, device := range devices {
+					fmt.Printf("    - %s (%s) at %s\n",
+						device["name"], device["id"], device["address"])
+					fmt.Printf("      Capabilities: %v\n", device["capabilities"])
+					fmt.Printf("      Last seen: %s\n", device["last_seen"])
+				}
+			}
 
 		case "quit", "exit", "q":
 			if service != nil {
