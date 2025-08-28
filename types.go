@@ -70,3 +70,12 @@ type AuthenticationResult struct {
 	PublicKey     string
 	Error         error
 }
+
+// ProtocolMode defines which protocol to use for communication
+type ProtocolMode int
+
+const (
+	ProtocolJSON   ProtocolMode = iota // JSON over UDP (default)
+	ProtocolBinary                     // Binary protocol for performance
+	ProtocolAuto                       // Automatically choose based on peer capabilities
+)

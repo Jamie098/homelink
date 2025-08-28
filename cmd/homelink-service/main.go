@@ -112,9 +112,15 @@ func main() {
 
 // startHTTPAPI starts the HTTP API server for event publishing
 func startHTTPAPI(service *homelink.HomeLinkService, port string) {
+	// Initialize dashboard
+	dashboard := homelink.NewDashboardServer(service, service.GetHealthMonitor())
+	
 	// Public endpoints (no auth required)
 	http.HandleFunc("/", rootHandler)
 	http.HandleFunc("/health", healthHandler)
+	
+	// Dashboard endpoints
+	dashboard.SetupRoutes(http.DefaultServeMux)
 
 	// Protected endpoints (require API key if set)
 	http.HandleFunc("/publish", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
@@ -152,13 +158,40 @@ func startHTTPAPI(service *homelink.HomeLinkService, port string) {
 		}))
 	}
 
+	// Health monitoring endpoints
+	http.HandleFunc("/health/metrics", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		healthMetricsHandler(w, r, service)
+	}))
+	http.HandleFunc("/health/summary", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		healthSummaryHandler(w, r, service)
+	}))
+
+	// Reliability endpoints
+	http.HandleFunc("/reliability/stats", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		reliabilityStatsHandler(w, r, service)
+	}))
+	http.HandleFunc("/publish/reliable", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		publishReliableEventHandler(w, r, service)
+	}))
+
+	// Protocol mode endpoint
+	http.HandleFunc("/protocol/mode", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		protocolModeHandler(w, r, service)
+	}))
+
 	log.Printf("HTTP API server starting on port %s", port)
-	log.Printf("  POST /publish       - Publish events")
-	log.Printf("  GET  /devices       - List discovered devices")
-	log.Printf("  POST /subscribe     - Subscribe to event types")
-	log.Printf("  POST /discovery     - Trigger device discovery")
-	log.Printf("  GET  /stats         - Discovery statistics")
-	log.Printf("  GET  /health        - Health check")
+	log.Printf("  GET  /dashboard            - Web dashboard")
+	log.Printf("  POST /publish              - Publish events")
+	log.Printf("  POST /publish/reliable     - Publish reliable events")
+	log.Printf("  GET  /devices              - List discovered devices")
+	log.Printf("  POST /subscribe            - Subscribe to event types")
+	log.Printf("  POST /discovery            - Trigger device discovery")
+	log.Printf("  GET  /stats                - Discovery statistics")
+	log.Printf("  GET  /health               - Health check")
+	log.Printf("  GET  /health/metrics       - Detailed health metrics")
+	log.Printf("  GET  /health/summary       - Health summary")
+	log.Printf("  GET  /reliability/stats    - Reliability statistics")
+	log.Printf("  GET/POST /protocol/mode    - Protocol mode management")
 
 	if service.IsSecurityEnabled() {
 		log.Printf("  GET  /security/qr-code  - Generate QR pairing code")
@@ -721,6 +754,237 @@ func securityStatsHandler(w http.ResponseWriter, r *http.Request, service *homel
 		"success": true,
 		"stats":   stats,
 	})
+}
+
+// New feature handlers
+
+// healthMetricsHandler returns detailed health metrics
+func healthMetricsHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Only GET method allowed",
+		})
+		return
+	}
+
+	healthMonitor := service.GetHealthMonitor()
+	if healthMonitor == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Health monitoring not available",
+		})
+		return
+	}
+
+	// Update metrics before returning
+	service.UpdateHealthMetrics()
+	metrics := healthMonitor.GetMetrics()
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"metrics": metrics,
+	})
+}
+
+// healthSummaryHandler returns health summary
+func healthSummaryHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Only GET method allowed",
+		})
+		return
+	}
+
+	summary := service.GetHealthSummary()
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"summary": summary,
+	})
+}
+
+// reliabilityStatsHandler returns reliability statistics
+func reliabilityStatsHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Only GET method allowed",
+		})
+		return
+	}
+
+	reliabilityManager := service.GetReliabilityManager()
+	if reliabilityManager == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Reliability manager not available",
+		})
+		return
+	}
+
+	stats := reliabilityManager.GetPendingMessages()
+	config := reliabilityManager.GetRetryConfiguration()
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":       true,
+		"pending_stats": stats,
+		"configuration": config,
+	})
+}
+
+// publishReliableEventHandler publishes events with reliability guarantees
+func publishReliableEventHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Only POST method allowed",
+		})
+		return
+	}
+
+	var eventReq struct {
+		EventType   string            `json:"event_type"`
+		Description string            `json:"description"`
+		Data        map[string]string `json:"data"`
+		Priority    string            `json:"priority"` // "low", "normal", "high", "emergency"
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&eventReq); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Invalid JSON payload: " + err.Error(),
+		})
+		return
+	}
+
+	if eventReq.EventType == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "event_type is required",
+		})
+		return
+	}
+
+	// Parse priority
+	var priority homelink.MessagePriority
+	switch strings.ToLower(eventReq.Priority) {
+	case "low":
+		priority = homelink.PriorityLow
+	case "high":
+		priority = homelink.PriorityHigh
+	case "emergency":
+		priority = homelink.PriorityEmergency
+	default:
+		priority = homelink.PriorityNormal
+	}
+
+	// Add timestamp if not provided
+	if eventReq.Data == nil {
+		eventReq.Data = make(map[string]string)
+	}
+	if _, exists := eventReq.Data["timestamp"]; !exists {
+		eventReq.Data["timestamp"] = fmt.Sprintf("%d", time.Now().Unix())
+	}
+
+	// Send reliable event
+	service.SendReliableEvent(eventReq.EventType, eventReq.Description, eventReq.Data, priority)
+
+	log.Printf("Published reliable event: %s - %s (priority: %s)", eventReq.EventType, eventReq.Description, eventReq.Priority)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(APIResponse{
+		Success: true,
+		Message: "Reliable event published to HomeLink network",
+	})
+}
+
+// protocolModeHandler manages protocol mode settings
+func protocolModeHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	switch r.Method {
+	case http.MethodGet:
+		currentMode := service.GetProtocolMode()
+		modeStr := "json"
+		if currentMode == homelink.ProtocolBinary {
+			modeStr = "binary"
+		} else if currentMode == homelink.ProtocolAuto {
+			modeStr = "auto"
+		}
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"success": true,
+			"mode":    modeStr,
+		})
+
+	case http.MethodPost:
+		var modeReq struct {
+			Mode string `json:"mode"` // "json", "binary", "auto"
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&modeReq); err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(APIResponse{
+				Success: false,
+				Message: "Invalid JSON payload: " + err.Error(),
+			})
+			return
+		}
+
+		var newMode homelink.ProtocolMode
+		switch strings.ToLower(modeReq.Mode) {
+		case "binary":
+			newMode = homelink.ProtocolBinary
+		case "auto":
+			newMode = homelink.ProtocolAuto
+		case "json":
+			newMode = homelink.ProtocolJSON
+		default:
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(APIResponse{
+				Success: false,
+				Message: "Invalid protocol mode. Use 'json', 'binary', or 'auto'",
+			})
+			return
+		}
+
+		service.SetProtocolMode(newMode)
+
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: true,
+			Message: fmt.Sprintf("Protocol mode set to %s", modeReq.Mode),
+		})
+
+	default:
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Only GET and POST methods allowed",
+		})
+	}
 }
 
 // getEnv gets an environment variable with a default value

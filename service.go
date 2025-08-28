@@ -6,10 +6,13 @@
 package homelink
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net"
 	"sync"
+	"time"
 )
 
 // HomeLinkService manages the entire HomeLink protocol
@@ -32,6 +35,13 @@ type HomeLinkService struct {
 	securityConfig *SecurityConfig
 	rateLimiter    *RateLimiter
 
+	// Performance and reliability components
+	healthMonitor      *HealthMonitor
+	reliabilityManager *ReliabilityManager
+	binaryEncoder      *BinaryEncoder
+	binaryDecoder      *BinaryDecoder
+	protocolMode       ProtocolMode
+
 	// Channels for internal communication
 	eventChan chan Event
 	stopChan  chan bool
@@ -39,7 +49,7 @@ type HomeLinkService struct {
 
 // NewHomeLinkService creates a new HomeLink protocol service
 func NewHomeLinkService(deviceID, deviceName string, capabilities []string) *HomeLinkService {
-	return &HomeLinkService{
+	service := &HomeLinkService{
 		deviceID:      deviceID,
 		deviceName:    deviceName,
 		capabilities:  capabilities,
@@ -47,7 +57,20 @@ func NewHomeLinkService(deviceID, deviceName string, capabilities []string) *Hom
 		subscriptions: make(map[string][]string),
 		eventChan:     make(chan Event, 100), // Buffer for events
 		stopChan:      make(chan bool),
+		protocolMode:  ProtocolJSON, // Default to JSON
 	}
+
+	// Initialize health monitoring
+	service.healthMonitor = NewHealthMonitor(deviceID)
+	
+	// Initialize reliability manager
+	service.reliabilityManager = NewReliabilityManager(deviceID)
+	
+	// Initialize binary protocol components
+	service.binaryEncoder = NewBinaryEncoder(deviceID)
+	service.binaryDecoder = NewBinaryDecoder()
+
+	return service
 }
 
 // NewSecureHomeLinkService creates a new HomeLink service with security enabled
@@ -61,7 +84,18 @@ func NewSecureHomeLinkService(deviceID, deviceName string, capabilities []string
 		securityConfig: config,
 		eventChan:      make(chan Event, 100),
 		stopChan:       make(chan bool),
+		protocolMode:   ProtocolJSON, // Default to JSON
 	}
+
+	// Initialize health monitoring
+	service.healthMonitor = NewHealthMonitor(deviceID)
+	
+	// Initialize reliability manager
+	service.reliabilityManager = NewReliabilityManager(deviceID)
+	
+	// Initialize binary protocol components
+	service.binaryEncoder = NewBinaryEncoder(deviceID)
+	service.binaryDecoder = NewBinaryDecoder()
 
 	if config.Enabled {
 		// Initialize security manager
@@ -129,6 +163,11 @@ func (s *HomeLinkService) Stop() {
 	}
 	if s.unicastConn != nil {
 		s.unicastConn.Close()
+	}
+
+	// Stop reliability manager
+	if s.reliabilityManager != nil {
+		s.reliabilityManager.Stop()
 	}
 }
 
@@ -248,4 +287,138 @@ func (s *HomeLinkService) GetSecurityStats() map[string]interface{} {
 	}
 
 	return stats
+}
+
+// New feature methods
+
+// GetHealthMonitor returns the health monitor instance
+func (s *HomeLinkService) GetHealthMonitor() *HealthMonitor {
+	return s.healthMonitor
+}
+
+// GetReliabilityManager returns the reliability manager instance
+func (s *HomeLinkService) GetReliabilityManager() *ReliabilityManager {
+	return s.reliabilityManager
+}
+
+// SetProtocolMode sets the protocol mode for communication
+func (s *HomeLinkService) SetProtocolMode(mode ProtocolMode) {
+	s.protocolMode = mode
+	log.Printf("Protocol mode changed to: %d", mode)
+}
+
+// GetProtocolMode returns the current protocol mode
+func (s *HomeLinkService) GetProtocolMode() ProtocolMode {
+	return s.protocolMode
+}
+
+// SendReliableEvent sends an event with reliability guarantees
+func (s *HomeLinkService) SendReliableEvent(eventType, description string, data map[string]string, priority MessagePriority) {
+	msg := Message{
+		Type:      MSG_EVENT,
+		Version:   PROTOCOL_VERSION,
+		Timestamp: time.Now().Unix(),
+		DeviceID:  s.deviceID,
+		Data: map[string]interface{}{
+			"event_type":  eventType,
+			"description": description,
+			"data":        data,
+		},
+	}
+
+	// Send as reliable message to all devices
+	devices := s.GetDevices()
+	for _, device := range devices {
+		reliableMsg := s.reliabilityManager.SendReliableMessage(
+			&msg,
+			device.ID,
+			priority,
+			DeliveryReliable,
+			func(ack *MessageAck) {
+				log.Printf("Event acknowledged by %s: %s", ack.RecipientID, ack.Status)
+			},
+			func() {
+				log.Printf("Event delivery timed out for device %s", device.ID)
+				if s.healthMonitor != nil {
+					s.healthMonitor.IncrementMessagesFailed()
+				}
+			},
+		)
+
+		// Send via appropriate protocol
+		s.sendReliableMessage(reliableMsg, device.Address)
+	}
+}
+
+// sendReliableMessage sends a reliable message using the configured protocol
+func (s *HomeLinkService) sendReliableMessage(reliableMsg *ReliableMessage, addr *net.UDPAddr) error {
+	var data []byte
+	var err error
+
+	switch s.protocolMode {
+	case ProtocolBinary:
+		binaryMsg, binaryErr := s.binaryEncoder.EncodeReliableMessage(reliableMsg)
+		if binaryErr != nil {
+			return fmt.Errorf("failed to encode binary message: %v", binaryErr)
+		}
+		
+		// Convert binary message to bytes
+		buf := make([]byte, 0, binaryMsg.GetSize())
+		writer := bytes.NewBuffer(buf)
+		_, err = binaryMsg.WriteTo(writer)
+		data = writer.Bytes()
+
+	default: // JSON protocol
+		if s.IsSecurityEnabled() {
+			secureMsg, encErr := s.security.EncryptMessage(&reliableMsg.Message)
+			if encErr != nil {
+				return fmt.Errorf("failed to encrypt message: %v", encErr)
+			}
+			data, err = json.Marshal(secureMsg)
+		} else {
+			data, err = json.Marshal(reliableMsg)
+		}
+	}
+
+	if err != nil {
+		return fmt.Errorf("failed to marshal message: %v", err)
+	}
+
+	// Send via UDP
+	conn, err := net.DialUDP("udp4", nil, addr)
+	if err != nil {
+		return fmt.Errorf("failed to create connection: %v", err)
+	}
+	defer conn.Close()
+
+	n, err := conn.Write(data)
+	if err != nil {
+		if s.healthMonitor != nil {
+			s.healthMonitor.IncrementMessagesFailed()
+		}
+		return err
+	}
+
+	if s.healthMonitor != nil {
+		s.healthMonitor.IncrementMessagesSent(uint64(n))
+	}
+
+	return nil
+}
+
+// UpdateHealthMetrics updates the health monitoring data
+func (s *HomeLinkService) UpdateHealthMetrics() {
+	if s.healthMonitor != nil {
+		s.healthMonitor.UpdateMetrics(s)
+	}
+}
+
+// GetHealthSummary returns a summary of system health
+func (s *HomeLinkService) GetHealthSummary() map[string]interface{} {
+	if s.healthMonitor != nil {
+		return s.healthMonitor.GetHealthSummary()
+	}
+	return map[string]interface{}{
+		"status": "health monitoring disabled",
+	}
 }
