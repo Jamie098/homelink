@@ -31,22 +31,22 @@ const (
 
 // ReliableMessage extends Message with reliability features
 type ReliableMessage struct {
-	Message     `json:"message"`
-	MessageID   string          `json:"message_id"`
-	Priority    MessagePriority `json:"priority"`
-	DeliveryMode DeliveryMode   `json:"delivery_mode"`
-	RetryCount  int            `json:"retry_count"`
-	MaxRetries  int            `json:"max_retries"`
-	ExpiresAt   int64          `json:"expires_at"`
+	Message      `json:"message"`
+	MessageID    string          `json:"message_id"`
+	Priority     MessagePriority `json:"priority"`
+	DeliveryMode DeliveryMode    `json:"delivery_mode"`
+	RetryCount   int             `json:"retry_count"`
+	MaxRetries   int             `json:"max_retries"`
+	ExpiresAt    int64           `json:"expires_at"`
 }
 
 // MessageAck represents an acknowledgment for a reliable message
 type MessageAck struct {
-	MessageID     string `json:"message_id"`
-	RecipientID   string `json:"recipient_id"`
-	Status        string `json:"status"` // "received", "processed", "failed"
-	ErrorMessage  string `json:"error_message,omitempty"`
-	ProcessedAt   int64  `json:"processed_at"`
+	MessageID    string `json:"message_id"`
+	RecipientID  string `json:"recipient_id"`
+	Status       string `json:"status"` // "received", "processed", "failed"
+	ErrorMessage string `json:"error_message,omitempty"`
+	ProcessedAt  int64  `json:"processed_at"`
 }
 
 // PendingMessage tracks messages waiting for acknowledgment
@@ -65,16 +65,16 @@ type ReliabilityManager struct {
 	pendingMessages map[string]*PendingMessage
 	ackCallbacks    map[string]func(*MessageAck)
 	mutex           sync.RWMutex
-	
+
 	// Configuration
-	defaultTimeout  time.Duration
-	retryInterval   time.Duration
-	maxRetries      int
-	
+	defaultTimeout time.Duration
+	retryInterval  time.Duration
+	maxRetries     int
+
 	// Channels
-	ackChan     chan *MessageAck
-	retryChan   chan *PendingMessage
-	stopChan    chan bool
+	ackChan   chan *MessageAck
+	retryChan chan *PendingMessage
+	stopChan  chan bool
 }
 
 // NewReliabilityManager creates a new reliability manager
@@ -90,12 +90,12 @@ func NewReliabilityManager(deviceID string) *ReliabilityManager {
 		retryChan:       make(chan *PendingMessage, 100),
 		stopChan:        make(chan bool),
 	}
-	
+
 	// Start background workers
 	go rm.processAcknowledgments()
 	go rm.processRetries()
 	go rm.cleanupExpiredMessages()
-	
+
 	return rm
 }
 
@@ -120,9 +120,9 @@ func (rm *ReliabilityManager) SendReliableMessage(
 	onAck func(*MessageAck),
 	onTimeout func(),
 ) *ReliableMessage {
-	
+
 	messageID := rm.GenerateMessageID()
-	
+
 	reliableMsg := &ReliableMessage{
 		Message:      *msg,
 		MessageID:    messageID,
@@ -132,7 +132,7 @@ func (rm *ReliabilityManager) SendReliableMessage(
 		MaxRetries:   rm.maxRetries,
 		ExpiresAt:    time.Now().Add(rm.defaultTimeout * time.Duration(rm.maxRetries+1)).Unix(),
 	}
-	
+
 	// Only track messages that require acknowledgment
 	if deliveryMode != DeliveryFireAndForget {
 		pending := &PendingMessage{
@@ -143,12 +143,12 @@ func (rm *ReliabilityManager) SendReliableMessage(
 			OnAck:           onAck,
 			OnTimeout:       onTimeout,
 		}
-		
+
 		rm.mutex.Lock()
 		rm.pendingMessages[messageID] = pending
 		rm.mutex.Unlock()
 	}
-	
+
 	return reliableMsg
 }
 
@@ -164,7 +164,7 @@ func (rm *ReliabilityManager) ProcessIncomingMessage(reliableMsg *ReliableMessag
 			ProcessedAt:  time.Now().Unix(),
 		}, false
 	}
-	
+
 	// Create acknowledgment
 	ack := &MessageAck{
 		MessageID:   reliableMsg.MessageID,
@@ -172,12 +172,12 @@ func (rm *ReliabilityManager) ProcessIncomingMessage(reliableMsg *ReliableMessag
 		Status:      "received",
 		ProcessedAt: time.Now().Unix(),
 	}
-	
+
 	// For fire-and-forget messages, no ack needed
 	if reliableMsg.DeliveryMode == DeliveryFireAndForget {
 		return nil, true
 	}
-	
+
 	return ack, true
 }
 
@@ -206,7 +206,7 @@ func (rm *ReliabilityManager) handleAcknowledgment(ack *MessageAck) {
 		delete(rm.pendingMessages, ack.MessageID)
 	}
 	rm.mutex.Unlock()
-	
+
 	if exists && pending.OnAck != nil {
 		go pending.OnAck(ack) // Call callback in goroutine to avoid blocking
 	}
@@ -216,7 +216,7 @@ func (rm *ReliabilityManager) handleAcknowledgment(ack *MessageAck) {
 func (rm *ReliabilityManager) processRetries() {
 	ticker := time.NewTicker(rm.retryInterval)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-rm.stopChan:
@@ -233,7 +233,7 @@ func (rm *ReliabilityManager) processRetries() {
 func (rm *ReliabilityManager) checkForRetries() {
 	rm.mutex.RLock()
 	toRetry := make([]*PendingMessage, 0)
-	
+
 	for _, pending := range rm.pendingMessages {
 		// Check if message needs retry
 		if time.Since(pending.LastRetry) >= rm.retryInterval {
@@ -246,7 +246,7 @@ func (rm *ReliabilityManager) checkForRetries() {
 		}
 	}
 	rm.mutex.RUnlock()
-	
+
 	// Process retries
 	for _, pending := range toRetry {
 		if pending.RetryCount >= pending.MaxRetries {
@@ -263,7 +263,7 @@ func (rm *ReliabilityManager) retryMessage(pending *PendingMessage) {
 	pending.RetryCount++
 	pending.LastRetry = time.Now()
 	rm.mutex.Unlock()
-	
+
 	// In a real implementation, this would resend the message through the network layer
 	// For now, we just log the retry attempt
 }
@@ -273,7 +273,7 @@ func (rm *ReliabilityManager) handleTimeout(pending *PendingMessage) {
 	rm.mutex.Lock()
 	delete(rm.pendingMessages, pending.MessageID)
 	rm.mutex.Unlock()
-	
+
 	if pending.OnTimeout != nil {
 		go pending.OnTimeout()
 	}
@@ -283,7 +283,7 @@ func (rm *ReliabilityManager) handleTimeout(pending *PendingMessage) {
 func (rm *ReliabilityManager) cleanupExpiredMessages() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-rm.stopChan:
@@ -298,7 +298,7 @@ func (rm *ReliabilityManager) cleanupExpiredMessages() {
 func (rm *ReliabilityManager) performCleanup() {
 	now := time.Now().Unix()
 	toDelete := make([]string, 0)
-	
+
 	rm.mutex.RLock()
 	for messageID, pending := range rm.pendingMessages {
 		if now > pending.ExpiresAt {
@@ -306,7 +306,7 @@ func (rm *ReliabilityManager) performCleanup() {
 		}
 	}
 	rm.mutex.RUnlock()
-	
+
 	rm.mutex.Lock()
 	for _, messageID := range toDelete {
 		delete(rm.pendingMessages, messageID)
@@ -318,48 +318,48 @@ func (rm *ReliabilityManager) performCleanup() {
 func (rm *ReliabilityManager) GetPendingMessages() map[string]interface{} {
 	rm.mutex.RLock()
 	defer rm.mutex.RUnlock()
-	
+
 	stats := map[string]interface{}{
 		"total_pending":    len(rm.pendingMessages),
 		"by_priority":      make(map[string]int),
 		"by_delivery_mode": make(map[string]int),
 		"oldest_message":   "",
 	}
-	
+
 	priorityCounts := map[MessagePriority]int{
 		PriorityLow: 0, PriorityNormal: 0, PriorityHigh: 0, PriorityEmergency: 0,
 	}
-	
+
 	modeCounts := map[DeliveryMode]int{
 		DeliveryFireAndForget: 0, DeliveryReliable: 0, DeliveryOrdered: 0,
 	}
-	
+
 	var oldestTime time.Time
 	var oldestID string
-	
+
 	for messageID, pending := range rm.pendingMessages {
 		priorityCounts[pending.Priority]++
 		modeCounts[pending.DeliveryMode]++
-		
+
 		if oldestTime.IsZero() || pending.SentAt.Before(oldestTime) {
 			oldestTime = pending.SentAt
 			oldestID = messageID
 		}
 	}
-	
+
 	stats["by_priority"] = map[string]int{
 		"low":       priorityCounts[PriorityLow],
-		"normal":    priorityCounts[PriorityNormal], 
+		"normal":    priorityCounts[PriorityNormal],
 		"high":      priorityCounts[PriorityHigh],
 		"emergency": priorityCounts[PriorityEmergency],
 	}
-	
+
 	stats["by_delivery_mode"] = map[string]int{
 		"fire_and_forget": modeCounts[DeliveryFireAndForget],
 		"reliable":        modeCounts[DeliveryReliable],
 		"ordered":         modeCounts[DeliveryOrdered],
 	}
-	
+
 	if oldestID != "" {
 		stats["oldest_message"] = map[string]interface{}{
 			"id":      oldestID,
@@ -367,7 +367,7 @@ func (rm *ReliabilityManager) GetPendingMessages() map[string]interface{} {
 			"age":     time.Since(oldestTime).String(),
 		}
 	}
-	
+
 	return stats
 }
 
@@ -384,7 +384,7 @@ func (rm *ReliabilityManager) SetRetryConfiguration(timeout time.Duration, inter
 func (rm *ReliabilityManager) GetRetryConfiguration() map[string]interface{} {
 	rm.mutex.RLock()
 	defer rm.mutex.RUnlock()
-	
+
 	return map[string]interface{}{
 		"default_timeout": rm.defaultTimeout.String(),
 		"retry_interval":  rm.retryInterval.String(),

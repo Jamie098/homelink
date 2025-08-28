@@ -47,12 +47,12 @@ type SecureMessage struct {
 
 // DevicePairingRequest represents a device requesting to join the network
 type DevicePairingRequest struct {
-	DeviceID   string                `json:"device_id"`
-	DeviceName string                `json:"device_name"`
-	PublicKey  string                `json:"public_key"`
-	Challenge  string                `json:"challenge"`
-	Timestamp  int64                 `json:"timestamp"`
-	Signature  string                `json:"signature"`
+	DeviceID   string `json:"device_id"`
+	DeviceName string `json:"device_name"`
+	PublicKey  string `json:"public_key"`
+	Challenge  string `json:"challenge"`
+	Timestamp  int64  `json:"timestamp"`
+	Signature  string `json:"signature"`
 }
 
 // DevicePairingResponse confirms acceptance into the network
@@ -126,7 +126,7 @@ func (sm *SecurityManager) AddTrustedDevice(deviceID, publicKeyB64 string) error
 	if err != nil {
 		return fmt.Errorf("invalid public key format: %v", err)
 	}
-	
+
 	if len(publicKey) != ed25519.PublicKeySize {
 		return fmt.Errorf("invalid public key size: got %d, want %d", len(publicKey), ed25519.PublicKeySize)
 	}
@@ -257,12 +257,12 @@ func (sm *SecurityManager) DecryptMessage(secureMsg *SecureMessage) (*Message, e
 // signSecureMessage signs a secure message with the device's private key
 func (sm *SecurityManager) signSecureMessage(secureMsg *SecureMessage) error {
 	// Create signing payload (everything except signature)
-	signingData := fmt.Sprintf("%s:%s:%s:%d", 
+	signingData := fmt.Sprintf("%s:%s:%s:%d",
 		secureMsg.DeviceID, secureMsg.Nonce, secureMsg.Encrypted, secureMsg.Timestamp)
-	
+
 	signature := ed25519.Sign(sm.privateKey, []byte(signingData))
 	secureMsg.Signature = base64.StdEncoding.EncodeToString(signature)
-	
+
 	return nil
 }
 
@@ -281,7 +281,7 @@ func (sm *SecurityManager) verifySecureMessage(secureMsg *SecureMessage) bool {
 		return false
 	}
 
-	signingData := fmt.Sprintf("%s:%s:%s:%d", 
+	signingData := fmt.Sprintf("%s:%s:%s:%d",
 		secureMsg.DeviceID, secureMsg.Nonce, secureMsg.Encrypted, secureMsg.Timestamp)
 
 	return ed25519.Verify(publicKey, []byte(signingData), signature)
@@ -331,7 +331,7 @@ func (sm *SecurityManager) VerifyPairingRequest(req *DevicePairingRequest) bool 
 
 	signingData := fmt.Sprintf("%s:%s:%s:%s:%d",
 		req.DeviceID, req.DeviceName, req.PublicKey, req.Challenge, req.Timestamp)
-	
+
 	return ed25519.Verify(ed25519.PublicKey(publicKey), []byte(signingData), signature)
 }
 

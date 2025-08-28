@@ -31,21 +31,21 @@ const (
 
 // BinaryHeader represents the fixed header for all binary messages
 type BinaryHeader struct {
-	Magic     uint32 // 0x484C4E4B ("HLNK")
-	Version   uint8
+	Magic       uint32 // 0x484C4E4B ("HLNK")
+	Version     uint8
 	MessageType BinaryMessageType
-	Flags     uint8
-	Reserved  uint8
-	Length    uint32 // Total message length including header
-	DeviceID  [16]byte // Fixed-size device ID (truncated/padded)
-	Timestamp uint64
+	Flags       uint8
+	Reserved    uint8
+	Length      uint32   // Total message length including header
+	DeviceID    [16]byte // Fixed-size device ID (truncated/padded)
+	Timestamp   uint64
 }
 
 // Header flags
 const (
-	FlagCompressed  uint8 = 0x01
-	FlagEncrypted   uint8 = 0x02
-	FlagReliable    uint8 = 0x04
+	FlagCompressed   uint8 = 0x01
+	FlagEncrypted    uint8 = 0x02
+	FlagReliable     uint8 = 0x04
 	FlagHighPriority uint8 = 0x08
 )
 
@@ -60,7 +60,7 @@ type BinaryMessage struct {
 
 // BinaryEncoder handles encoding messages to binary format
 type BinaryEncoder struct {
-	deviceID    string
+	deviceID      string
 	deviceIDBytes [16]byte
 }
 
@@ -72,10 +72,10 @@ func NewBinaryEncoder(deviceID string) *BinaryEncoder {
 	encoder := &BinaryEncoder{
 		deviceID: deviceID,
 	}
-	
+
 	// Convert device ID to fixed-size byte array
 	copy(encoder.deviceIDBytes[:], []byte(deviceID))
-	
+
 	return encoder
 }
 
@@ -91,13 +91,13 @@ func (e *BinaryEncoder) EncodeMessage(msg *Message) (*BinaryMessage, error) {
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Encode payload based on message type
 	payload, err := e.encodePayload(msg)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Create header
 	header := BinaryHeader{
 		Magic:       BinaryMagic,
@@ -108,9 +108,9 @@ func (e *BinaryEncoder) EncodeMessage(msg *Message) (*BinaryMessage, error) {
 		Length:      uint32(32 + len(payload)), // Header size + payload size
 		Timestamp:   uint64(time.Now().Unix()),
 	}
-	
+
 	copy(header.DeviceID[:], e.deviceIDBytes[:])
-	
+
 	return &BinaryMessage{
 		Header:  header,
 		Payload: payload,
@@ -123,86 +123,86 @@ func (e *BinaryEncoder) EncodeReliableMessage(reliableMsg *ReliableMessage) (*Bi
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Set reliable flag
 	binaryMsg.Header.Flags |= FlagReliable
-	
+
 	// Set priority flag
 	if reliableMsg.Priority >= PriorityHigh {
 		binaryMsg.Header.Flags |= FlagHighPriority
 	}
-	
+
 	// Prepend reliability metadata to payload
 	reliabilityHeader := make([]byte, 28) // MessageID(16) + Priority(1) + DeliveryMode(1) + RetryCount(1) + MaxRetries(1) + ExpiresAt(8)
-	
+
 	copy(reliabilityHeader[0:16], []byte(reliableMsg.MessageID))
 	reliabilityHeader[16] = uint8(reliableMsg.Priority)
 	reliabilityHeader[17] = uint8(reliableMsg.DeliveryMode)
 	reliabilityHeader[18] = uint8(reliableMsg.RetryCount)
 	reliabilityHeader[19] = uint8(reliableMsg.MaxRetries)
 	binary.LittleEndian.PutUint64(reliabilityHeader[20:28], uint64(reliableMsg.ExpiresAt))
-	
+
 	// Combine reliability header with original payload
 	newPayload := make([]byte, len(reliabilityHeader)+len(binaryMsg.Payload))
 	copy(newPayload, reliabilityHeader)
 	copy(newPayload[len(reliabilityHeader):], binaryMsg.Payload)
-	
+
 	binaryMsg.Payload = newPayload
 	binaryMsg.Header.Length = uint32(32 + len(newPayload))
-	
+
 	return binaryMsg, nil
 }
 
 // WriteTo writes a binary message to an io.Writer
 func (bm *BinaryMessage) WriteTo(w io.Writer) (int64, error) {
 	written := int64(0)
-	
+
 	// Write header
 	err := binary.Write(w, binary.LittleEndian, &bm.Header)
 	if err != nil {
 		return written, err
 	}
 	written += 32 // Header size
-	
+
 	// Write payload
 	n, err := w.Write(bm.Payload)
 	written += int64(n)
-	
+
 	return written, err
 }
 
 // ReadFrom reads a binary message from an io.Reader
 func (bm *BinaryMessage) ReadFrom(r io.Reader) (int64, error) {
 	read := int64(0)
-	
+
 	// Read header
 	err := binary.Read(r, binary.LittleEndian, &bm.Header)
 	if err != nil {
 		return read, err
 	}
 	read += 32
-	
+
 	// Validate magic number
 	if bm.Header.Magic != BinaryMagic {
 		return read, errors.New("invalid magic number")
 	}
-	
+
 	// Validate version
 	if bm.Header.Version != BinaryProtocolVersion {
 		return read, fmt.Errorf("unsupported protocol version: %d", bm.Header.Version)
 	}
-	
+
 	// Calculate payload size
 	payloadSize := bm.Header.Length - 32
 	if payloadSize > 1024*1024 { // 1MB limit
 		return read, errors.New("payload too large")
 	}
-	
+
 	// Read payload
 	bm.Payload = make([]byte, payloadSize)
 	n, err := io.ReadFull(r, bm.Payload)
 	read += int64(n)
-	
+
 	return read, err
 }
 
@@ -217,19 +217,19 @@ func (d *BinaryDecoder) DecodeMessage(binaryMsg *BinaryMessage) (*Message, error
 			break
 		}
 	}
-	
+
 	// Convert message type
 	msgType, err := d.convertBinaryMessageType(binaryMsg.Header.MessageType)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Decode payload
 	data, err := d.decodePayload(binaryMsg.Header.MessageType, binaryMsg.Payload)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &Message{
 		Type:      msgType,
 		Version:   fmt.Sprintf("binary-%d", binaryMsg.Header.Version),
@@ -244,12 +244,12 @@ func (d *BinaryDecoder) DecodeReliableMessage(binaryMsg *BinaryMessage) (*Reliab
 	if binaryMsg.Header.Flags&FlagReliable == 0 {
 		return nil, errors.New("message is not marked as reliable")
 	}
-	
+
 	// Extract reliability header
 	if len(binaryMsg.Payload) < 28 {
 		return nil, errors.New("invalid reliable message format")
 	}
-	
+
 	messageID := string(binaryMsg.Payload[0:16])
 	// Remove null padding from message ID
 	for i, b := range binaryMsg.Payload[0:16] {
@@ -258,26 +258,26 @@ func (d *BinaryDecoder) DecodeReliableMessage(binaryMsg *BinaryMessage) (*Reliab
 			break
 		}
 	}
-	
+
 	priority := MessagePriority(binaryMsg.Payload[16])
 	deliveryMode := DeliveryMode(binaryMsg.Payload[17])
 	retryCount := int(binaryMsg.Payload[18])
 	maxRetries := int(binaryMsg.Payload[19])
 	expiresAt := int64(binary.LittleEndian.Uint64(binaryMsg.Payload[20:28]))
-	
+
 	// Create a new binary message with the payload minus reliability header
 	innerMsg := &BinaryMessage{
 		Header:  binaryMsg.Header,
 		Payload: binaryMsg.Payload[28:],
 	}
 	innerMsg.Header.Flags &^= FlagReliable // Remove reliable flag for inner decoding
-	
+
 	// Decode inner message
 	msg, err := d.DecodeMessage(innerMsg)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return &ReliableMessage{
 		Message:      *msg,
 		MessageID:    messageID,
@@ -341,7 +341,7 @@ func (d *BinaryDecoder) convertBinaryMessageType(binaryType BinaryMessageType) (
 func (e *BinaryEncoder) encodePayload(msg *Message) ([]byte, error) {
 	// This is a simplified implementation
 	// In a real system, you'd have specific binary encodings for each message type
-	
+
 	switch msg.Type {
 	case MSG_DEVICE_ANNOUNCEMENT:
 		return e.encodeDeviceAnnouncement(msg.Data)
@@ -364,14 +364,14 @@ func (e *BinaryEncoder) encodeDeviceAnnouncement(data interface{}) ([]byte, erro
 	// Simplified: encode as length-prefixed strings
 	// Real implementation would use proper binary format
 	payload := make([]byte, 0, 256)
-	
+
 	if dataMap, ok := data.(map[string]interface{}); ok {
 		if name, ok := dataMap["name"].(string); ok {
 			nameBytes := []byte(name)
 			payload = append(payload, byte(len(nameBytes)))
 			payload = append(payload, nameBytes...)
 		}
-		
+
 		if caps, ok := dataMap["capabilities"].([]string); ok {
 			payload = append(payload, byte(len(caps)))
 			for _, cap := range caps {
@@ -381,7 +381,7 @@ func (e *BinaryEncoder) encodeDeviceAnnouncement(data interface{}) ([]byte, erro
 			}
 		}
 	}
-	
+
 	return payload, nil
 }
 
@@ -391,13 +391,13 @@ func (e *BinaryEncoder) encodeSubscription(data interface{}) ([]byte, error) {
 		if eventTypes, ok := dataMap["event_types"].([]string); ok {
 			payload := make([]byte, 0, 128)
 			payload = append(payload, byte(len(eventTypes)))
-			
+
 			for _, eventType := range eventTypes {
 				eventBytes := []byte(eventType)
 				payload = append(payload, byte(len(eventBytes)))
 				payload = append(payload, eventBytes...)
 			}
-			
+
 			return payload, nil
 		}
 	}
@@ -435,10 +435,10 @@ func (d *BinaryDecoder) decodeDeviceAnnouncement(payload []byte) (interface{}, e
 	if len(payload) < 1 {
 		return nil, errors.New("invalid device announcement payload")
 	}
-	
+
 	result := make(map[string]interface{})
 	offset := 0
-	
+
 	// Decode name
 	if offset < len(payload) {
 		nameLen := int(payload[offset])
@@ -448,13 +448,13 @@ func (d *BinaryDecoder) decodeDeviceAnnouncement(payload []byte) (interface{}, e
 			offset += nameLen
 		}
 	}
-	
+
 	// Decode capabilities
 	if offset < len(payload) {
 		capCount := int(payload[offset])
 		offset++
 		capabilities := make([]string, 0, capCount)
-		
+
 		for i := 0; i < capCount && offset < len(payload); i++ {
 			capLen := int(payload[offset])
 			offset++
@@ -463,10 +463,10 @@ func (d *BinaryDecoder) decodeDeviceAnnouncement(payload []byte) (interface{}, e
 				offset += capLen
 			}
 		}
-		
+
 		result["capabilities"] = capabilities
 	}
-	
+
 	return result, nil
 }
 
@@ -475,11 +475,11 @@ func (d *BinaryDecoder) decodeSubscription(payload []byte) (interface{}, error) 
 	if len(payload) < 1 {
 		return nil, errors.New("invalid subscription payload")
 	}
-	
+
 	eventCount := int(payload[0])
 	offset := 1
 	eventTypes := make([]string, 0, eventCount)
-	
+
 	for i := 0; i < eventCount && offset < len(payload); i++ {
 		eventLen := int(payload[offset])
 		offset++
@@ -488,7 +488,7 @@ func (d *BinaryDecoder) decodeSubscription(payload []byte) (interface{}, error) 
 			offset += eventLen
 		}
 	}
-	
+
 	return map[string]interface{}{
 		"event_types": eventTypes,
 	}, nil

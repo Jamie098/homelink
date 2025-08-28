@@ -15,29 +15,29 @@ import (
 
 // EventFilter defines filtering criteria for events
 type EventFilter struct {
-	Name        string                 `json:"name"`
-	Enabled     bool                   `json:"enabled"`
-	EventTypes  []string               `json:"event_types"`  // Filter by event type
-	DeviceIDs   []string               `json:"device_ids"`   // Filter by device
-	MinInterval time.Duration          `json:"min_interval"` // Minimum time between similar events
-	Conditions  []FilterCondition      `json:"conditions"`   // Advanced conditions
-	Actions     FilterAction           `json:"actions"`      // What to do with matched events
+	Name        string            `json:"name"`
+	Enabled     bool              `json:"enabled"`
+	EventTypes  []string          `json:"event_types"`  // Filter by event type
+	DeviceIDs   []string          `json:"device_ids"`   // Filter by device
+	MinInterval time.Duration     `json:"min_interval"` // Minimum time between similar events
+	Conditions  []FilterCondition `json:"conditions"`   // Advanced conditions
+	Actions     FilterAction      `json:"actions"`      // What to do with matched events
 }
 
 // FilterCondition represents a single filtering condition
 type FilterCondition struct {
-	Field    string      `json:"field"`    // Field to check (confidence, zone, etc.)
-	Operator string      `json:"operator"` // ==, !=, >, <, contains, matches
-	Value    interface{} `json:"value"`    // Value to compare against
-	Regex    *regexp.Regexp `json:"-"`     // Compiled regex for 'matches' operator
+	Field    string         `json:"field"`    // Field to check (confidence, zone, etc.)
+	Operator string         `json:"operator"` // ==, !=, >, <, contains, matches
+	Value    interface{}    `json:"value"`    // Value to compare against
+	Regex    *regexp.Regexp `json:"-"`        // Compiled regex for 'matches' operator
 }
 
 // FilterAction defines what to do when filter matches
 type FilterAction struct {
-	Type       string  `json:"type"`        // allow, deny, modify, rate_limit
-	Priority   *string `json:"priority"`    // Change message priority
-	Throttle   *int    `json:"throttle"`    // Max events per minute
-	Tags       []string `json:"tags"`       // Add tags to event
+	Type     string   `json:"type"`     // allow, deny, modify, rate_limit
+	Priority *string  `json:"priority"` // Change message priority
+	Throttle *int     `json:"throttle"` // Max events per minute
+	Tags     []string `json:"tags"`     // Add tags to event
 }
 
 // EventDeduplicator manages duplicate event detection
@@ -58,30 +58,30 @@ type DuplicateInfo struct {
 
 // FilteringSystem manages all event filtering and deduplication
 type FilteringSystem struct {
-	filters       []EventFilter
-	deduplicator  *EventDeduplicator
-	mutex         sync.RWMutex
-	stats         FilteringStats
+	filters      []EventFilter
+	deduplicator *EventDeduplicator
+	mutex        sync.RWMutex
+	stats        FilteringStats
 }
 
 // FilteringStats tracks filtering system performance
 type FilteringStats struct {
-	EventsProcessed    uint64            `json:"events_processed"`
-	EventsFiltered     uint64            `json:"events_filtered"`
-	EventsDuplicated   uint64            `json:"events_duplicated"`
-	EventsModified     uint64            `json:"events_modified"`
-	FilterHits         map[string]uint64 `json:"filter_hits"`
-	LastReset          time.Time         `json:"last_reset"`
+	EventsProcessed  uint64            `json:"events_processed"`
+	EventsFiltered   uint64            `json:"events_filtered"`
+	EventsDuplicated uint64            `json:"events_duplicated"`
+	EventsModified   uint64            `json:"events_modified"`
+	FilterHits       map[string]uint64 `json:"filter_hits"`
+	LastReset        time.Time         `json:"last_reset"`
 }
 
 // FilterResult represents the result of filtering an event
 type FilterResult struct {
-	Action     string                 `json:"action"`     // allow, deny, modify
-	Modified   bool                   `json:"modified"`   // Whether event was modified
-	Tags       []string               `json:"tags"`       // Tags added to event
-	Reason     string                 `json:"reason"`     // Why this action was taken
+	Action     string                 `json:"action"`      // allow, deny, modify
+	Modified   bool                   `json:"modified"`    // Whether event was modified
+	Tags       []string               `json:"tags"`        // Tags added to event
+	Reason     string                 `json:"reason"`      // Why this action was taken
 	FilterName string                 `json:"filter_name"` // Which filter triggered
-	NewData    map[string]interface{} `json:"new_data"`   // Modified event data
+	NewData    map[string]interface{} `json:"new_data"`    // Modified event data
 }
 
 // NewEventDeduplicator creates a new deduplication system
@@ -91,10 +91,10 @@ func NewEventDeduplicator(window time.Duration, maxEntries int) *EventDeduplicat
 		window:      window,
 		maxEntries:  maxEntries,
 	}
-	
+
 	// Start cleanup routine
 	go ed.cleanupRoutine()
-	
+
 	return ed
 }
 
@@ -124,11 +124,11 @@ func (fs *FilteringSystem) AddFilter(filter EventFilter) error {
 			}
 		}
 	}
-	
+
 	fs.mutex.Lock()
 	fs.filters = append(fs.filters, filter)
 	fs.mutex.Unlock()
-	
+
 	log.Printf("Added event filter: %s", filter.Name)
 	return nil
 }
@@ -137,7 +137,7 @@ func (fs *FilteringSystem) AddFilter(filter EventFilter) error {
 func (fs *FilteringSystem) RemoveFilter(name string) bool {
 	fs.mutex.Lock()
 	defer fs.mutex.Unlock()
-	
+
 	for i, filter := range fs.filters {
 		if filter.Name == name {
 			fs.filters = append(fs.filters[:i], fs.filters[i+1:]...)
@@ -153,30 +153,30 @@ func (fs *FilteringSystem) ProcessEvent(msg *Message) *FilterResult {
 	fs.mutex.Lock()
 	fs.stats.EventsProcessed++
 	fs.mutex.Unlock()
-	
+
 	// Check for duplicates first
 	if fs.deduplicator.IsDuplicate(msg) {
 		fs.mutex.Lock()
 		fs.stats.EventsDuplicated++
 		fs.mutex.Unlock()
-		
+
 		return &FilterResult{
 			Action: "deny",
 			Reason: "duplicate event",
 		}
 	}
-	
+
 	// Apply filters
 	fs.mutex.RLock()
 	filters := make([]EventFilter, len(fs.filters))
 	copy(filters, fs.filters)
 	fs.mutex.RUnlock()
-	
+
 	for _, filter := range filters {
 		if !filter.Enabled {
 			continue
 		}
-		
+
 		if result := fs.applyFilter(msg, filter); result != nil {
 			// Update stats
 			fs.mutex.Lock()
@@ -187,12 +187,12 @@ func (fs *FilteringSystem) ProcessEvent(msg *Message) *FilterResult {
 				fs.stats.EventsModified++
 			}
 			fs.mutex.Unlock()
-			
+
 			result.FilterName = filter.Name
 			return result
 		}
 	}
-	
+
 	// No filters matched, allow the event
 	return &FilterResult{
 		Action: "allow",
@@ -215,7 +215,7 @@ func (fs *FilteringSystem) applyFilter(msg *Message, filter EventFilter) *Filter
 			return nil // Filter doesn't apply to this event type
 		}
 	}
-	
+
 	// Check device ID filter
 	if len(filter.DeviceIDs) > 0 {
 		matched := false
@@ -229,7 +229,7 @@ func (fs *FilteringSystem) applyFilter(msg *Message, filter EventFilter) *Filter
 			return nil // Filter doesn't apply to this device
 		}
 	}
-	
+
 	// Check minimum interval
 	if filter.MinInterval > 0 {
 		eventKey := fmt.Sprintf("%s:%s", msg.DeviceID, msg.Type)
@@ -240,12 +240,12 @@ func (fs *FilteringSystem) applyFilter(msg *Message, filter EventFilter) *Filter
 			}
 		}
 	}
-	
+
 	// Evaluate conditions
 	if !fs.evaluateConditions(msg, filter.Conditions) {
 		return nil // Conditions not met
 	}
-	
+
 	// Apply actions
 	return fs.applyFilterActions(msg, filter.Actions)
 }
@@ -255,7 +255,7 @@ func (fs *FilteringSystem) evaluateConditions(msg *Message, conditions []FilterC
 	if len(conditions) == 0 {
 		return true // No conditions means always match
 	}
-	
+
 	for _, condition := range conditions {
 		if !fs.evaluateCondition(msg, condition) {
 			return false
@@ -267,7 +267,7 @@ func (fs *FilteringSystem) evaluateConditions(msg *Message, conditions []FilterC
 // evaluateCondition evaluates a single condition
 func (fs *FilteringSystem) evaluateCondition(msg *Message, condition FilterCondition) bool {
 	var fieldValue interface{}
-	
+
 	// Extract field value from message
 	switch condition.Field {
 	case "device_id":
@@ -288,11 +288,11 @@ func (fs *FilteringSystem) evaluateCondition(msg *Message, condition FilterCondi
 			}
 		}
 	}
-	
+
 	if fieldValue == nil {
 		return false
 	}
-	
+
 	// Apply operator
 	switch condition.Operator {
 	case "==":
@@ -318,7 +318,7 @@ func (fs *FilteringSystem) evaluateCondition(msg *Message, condition FilterCondi
 			return condition.Regex.MatchString(fv)
 		}
 	}
-	
+
 	return false
 }
 
@@ -327,7 +327,7 @@ func (fs *FilteringSystem) compareNumbers(a, b interface{}, operator string) boo
 	// Convert to float64 for comparison
 	var fa, fb float64
 	var ok bool
-	
+
 	switch v := a.(type) {
 	case float64:
 		fa = v
@@ -348,11 +348,11 @@ func (fs *FilteringSystem) compareNumbers(a, b interface{}, operator string) boo
 			ok = true
 		}
 	}
-	
+
 	if !ok {
 		return false
 	}
-	
+
 	switch v := b.(type) {
 	case float64:
 		fb = v
@@ -371,7 +371,7 @@ func (fs *FilteringSystem) compareNumbers(a, b interface{}, operator string) boo
 	default:
 		return false
 	}
-	
+
 	switch operator {
 	case ">":
 		return fa > fb
@@ -382,7 +382,7 @@ func (fs *FilteringSystem) compareNumbers(a, b interface{}, operator string) boo
 	case "<=":
 		return fa <= fb
 	}
-	
+
 	return false
 }
 
@@ -405,7 +405,7 @@ func (fs *FilteringSystem) applyFilterActions(msg *Message, actions FilterAction
 		Tags:     make([]string, 0),
 		NewData:  make(map[string]interface{}),
 	}
-	
+
 	switch actions.Type {
 	case "allow":
 		result.Reason = "explicitly allowed by filter"
@@ -414,17 +414,17 @@ func (fs *FilteringSystem) applyFilterActions(msg *Message, actions FilterAction
 	case "modify":
 		result.Modified = true
 		result.Reason = "event modified by filter"
-		
+
 		// Apply modifications
 		if actions.Priority != nil {
 			result.NewData["priority"] = *actions.Priority
 		}
-		
+
 		if len(actions.Tags) > 0 {
 			result.Tags = actions.Tags
 			result.NewData["tags"] = actions.Tags
 		}
-		
+
 	case "rate_limit":
 		if actions.Throttle != nil {
 			// Check if we're within rate limit
@@ -438,19 +438,19 @@ func (fs *FilteringSystem) applyFilterActions(msg *Message, actions FilterAction
 			}
 		}
 	}
-	
+
 	return result
 }
 
 // IsDuplicate checks if an event is a duplicate
 func (ed *EventDeduplicator) IsDuplicate(msg *Message) bool {
 	hash := ed.generateEventHash(msg)
-	
+
 	ed.mutex.Lock()
 	defer ed.mutex.Unlock()
-	
+
 	now := time.Now()
-	
+
 	if info, exists := ed.eventHashes[hash]; exists {
 		// Check if within deduplication window
 		if now.Sub(info.LastSeen) < ed.window {
@@ -464,7 +464,7 @@ func (ed *EventDeduplicator) IsDuplicate(msg *Message) bool {
 		info.Count = 1
 		return false
 	}
-	
+
 	// New event, add to tracking
 	ed.eventHashes[hash] = &DuplicateInfo{
 		FirstSeen: now,
@@ -472,12 +472,12 @@ func (ed *EventDeduplicator) IsDuplicate(msg *Message) bool {
 		Count:     1,
 		Hash:      hash,
 	}
-	
+
 	// Cleanup if we have too many entries
 	if len(ed.eventHashes) > ed.maxEntries {
 		ed.cleanup()
 	}
-	
+
 	return false
 }
 
@@ -485,11 +485,11 @@ func (ed *EventDeduplicator) IsDuplicate(msg *Message) bool {
 func (ed *EventDeduplicator) IsWithinInterval(eventKey string, interval time.Duration) bool {
 	ed.mutex.RLock()
 	defer ed.mutex.RUnlock()
-	
+
 	if info, exists := ed.eventHashes[eventKey]; exists {
 		return time.Since(info.LastSeen) < interval
 	}
-	
+
 	return false
 }
 
@@ -497,10 +497,10 @@ func (ed *EventDeduplicator) IsWithinInterval(eventKey string, interval time.Dur
 func (ed *EventDeduplicator) CheckRateLimit(eventKey string, maxPerMinute int) bool {
 	ed.mutex.Lock()
 	defer ed.mutex.Unlock()
-	
+
 	now := time.Now()
 	minuteAgo := now.Add(-1 * time.Minute)
-	
+
 	// Count events in the last minute
 	count := 0
 	for _, info := range ed.eventHashes {
@@ -508,7 +508,7 @@ func (ed *EventDeduplicator) CheckRateLimit(eventKey string, maxPerMinute int) b
 			count++
 		}
 	}
-	
+
 	return count < maxPerMinute
 }
 
@@ -516,7 +516,7 @@ func (ed *EventDeduplicator) CheckRateLimit(eventKey string, maxPerMinute int) b
 func (ed *EventDeduplicator) generateEventHash(msg *Message) string {
 	// Create hash based on device, type, and key data fields
 	hashInput := fmt.Sprintf("%s:%s:%d", msg.DeviceID, msg.Type, msg.Timestamp/60) // Minute precision
-	
+
 	// Add important data fields
 	if dataMap, ok := msg.Data.(map[string]interface{}); ok {
 		// Include key fields that should be considered for deduplication
@@ -527,7 +527,7 @@ func (ed *EventDeduplicator) generateEventHash(msg *Message) string {
 			}
 		}
 	}
-	
+
 	hash := md5.Sum([]byte(hashInput))
 	return fmt.Sprintf("%x", hash)
 }
@@ -535,7 +535,7 @@ func (ed *EventDeduplicator) generateEventHash(msg *Message) string {
 // cleanup removes old entries from the cache
 func (ed *EventDeduplicator) cleanup() {
 	cutoff := time.Now().Add(-ed.window * 2)
-	
+
 	for hash, info := range ed.eventHashes {
 		if info.LastSeen.Before(cutoff) {
 			delete(ed.eventHashes, hash)
@@ -547,7 +547,7 @@ func (ed *EventDeduplicator) cleanup() {
 func (ed *EventDeduplicator) cleanupRoutine() {
 	ticker := time.NewTicker(5 * time.Minute)
 	defer ticker.Stop()
-	
+
 	for {
 		<-ticker.C
 		ed.mutex.Lock()
@@ -560,14 +560,14 @@ func (ed *EventDeduplicator) cleanupRoutine() {
 func (fs *FilteringSystem) GetStats() FilteringStats {
 	fs.mutex.RLock()
 	defer fs.mutex.RUnlock()
-	
+
 	// Create a copy to avoid race conditions
 	stats := fs.stats
 	stats.FilterHits = make(map[string]uint64)
 	for k, v := range fs.stats.FilterHits {
 		stats.FilterHits[k] = v
 	}
-	
+
 	return stats
 }
 
@@ -575,7 +575,7 @@ func (fs *FilteringSystem) GetStats() FilteringStats {
 func (fs *FilteringSystem) ResetStats() {
 	fs.mutex.Lock()
 	defer fs.mutex.Unlock()
-	
+
 	fs.stats = FilteringStats{
 		FilterHits: make(map[string]uint64),
 		LastReset:  time.Now(),
@@ -586,6 +586,6 @@ func (fs *FilteringSystem) ResetStats() {
 func (fs *FilteringSystem) GetFilterCount() int {
 	fs.mutex.RLock()
 	defer fs.mutex.RUnlock()
-	
+
 	return len(fs.filters)
 }

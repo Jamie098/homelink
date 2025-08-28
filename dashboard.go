@@ -30,7 +30,7 @@ func (ds *DashboardServer) SetupRoutes(mux *http.ServeMux) {
 	// Serve dashboard HTML
 	mux.HandleFunc("/dashboard", ds.dashboardHandler)
 	mux.HandleFunc("/dashboard/", ds.dashboardHandler)
-	
+
 	// API endpoints for dashboard data
 	mux.HandleFunc("/api/dashboard/status", ds.statusHandler)
 	mux.HandleFunc("/api/dashboard/devices", ds.devicesHandler)
@@ -48,7 +48,7 @@ func (ds *DashboardServer) dashboardHandler(w http.ResponseWriter, r *http.Reque
 
 	// Get basic service info for template
 	status := ds.getServiceStatus()
-	
+
 	tmpl := template.Must(template.New("dashboard").Parse(dashboardHTML))
 	tmpl.Execute(w, status)
 }
@@ -73,10 +73,10 @@ func (ds *DashboardServer) devicesHandler(w http.ResponseWriter, r *http.Request
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	devices := ds.service.GetDevices()
 	deviceList := make([]map[string]interface{}, 0, len(devices))
-	
+
 	for _, device := range devices {
 		deviceInfo := map[string]interface{}{
 			"id":           device.ID,
@@ -86,11 +86,11 @@ func (ds *DashboardServer) devicesHandler(w http.ResponseWriter, r *http.Request
 			"trusted":      device.Trusted,
 			"address":      "",
 		}
-		
+
 		if device.Address != nil {
 			deviceInfo["address"] = device.Address.String()
 		}
-		
+
 		// Add time since last seen
 		timeSince := time.Since(device.LastSeen)
 		if timeSince < time.Minute {
@@ -103,15 +103,15 @@ func (ds *DashboardServer) devicesHandler(w http.ResponseWriter, r *http.Request
 			deviceInfo["status"] = "offline"
 			deviceInfo["last_seen_human"] = fmt.Sprintf("%d hours ago", int(timeSince.Hours()))
 		}
-		
+
 		deviceList = append(deviceList, deviceInfo)
 	}
-	
+
 	response := map[string]interface{}{
 		"devices": deviceList,
 		"count":   len(deviceList),
 	}
-	
+
 	json.NewEncoder(w).Encode(response)
 }
 
@@ -123,18 +123,18 @@ func (ds *DashboardServer) healthHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	if ds.health != nil {
 		// Update metrics before returning
 		ds.health.UpdateMetrics(ds.service)
 		metrics := ds.health.GetMetrics()
 		summary := ds.health.GetHealthSummary()
-		
+
 		response := map[string]interface{}{
 			"metrics": metrics,
 			"summary": summary,
 		}
-		
+
 		json.NewEncoder(w).Encode(response)
 	} else {
 		json.NewEncoder(w).Encode(map[string]interface{}{
@@ -151,7 +151,7 @@ func (ds *DashboardServer) eventsHandler(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	// This is a placeholder - in a real implementation you'd store recent events
 	events := []map[string]interface{}{
 		{
@@ -167,7 +167,7 @@ func (ds *DashboardServer) eventsHandler(w http.ResponseWriter, r *http.Request)
 			"description": "Motion detected at front door",
 		},
 	}
-	
+
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"events": events,
 	})
@@ -181,14 +181,14 @@ func (ds *DashboardServer) securityHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	
+
 	if ds.service.IsSecurityEnabled() {
 		stats := ds.service.GetSecurityStats()
 		json.NewEncoder(w).Encode(stats)
 	} else {
 		json.NewEncoder(w).Encode(map[string]interface{}{
 			"security_enabled": false,
-			"message": "Security features are not enabled",
+			"message":          "Security features are not enabled",
 		})
 	}
 }
@@ -196,7 +196,7 @@ func (ds *DashboardServer) securityHandler(w http.ResponseWriter, r *http.Reques
 // getServiceStatus returns basic service information
 func (ds *DashboardServer) getServiceStatus() map[string]interface{} {
 	devices := ds.service.GetDevices()
-	
+
 	// Count online devices (seen within last 5 minutes)
 	onlineCount := 0
 	cutoff := time.Now().Add(-5 * time.Minute)
@@ -205,17 +205,17 @@ func (ds *DashboardServer) getServiceStatus() map[string]interface{} {
 			onlineCount++
 		}
 	}
-	
+
 	status := map[string]interface{}{
-		"device_name":     "HomeLink Service", // Would come from service
-		"device_id":       "homelink-service", // Would come from service
-		"total_devices":   len(devices),
-		"online_devices":  onlineCount,
+		"device_name":      "HomeLink Service", // Would come from service
+		"device_id":        "homelink-service", // Would come from service
+		"total_devices":    len(devices),
+		"online_devices":   onlineCount,
 		"security_enabled": ds.service.IsSecurityEnabled(),
-		"uptime":          time.Since(time.Now().Add(-1 * time.Hour)).String(), // Placeholder
-		"version":         "1.0.0",
+		"uptime":           time.Since(time.Now().Add(-1 * time.Hour)).String(), // Placeholder
+		"version":          "1.0.0",
 	}
-	
+
 	return status
 }
 

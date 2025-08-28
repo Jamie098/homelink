@@ -12,68 +12,68 @@ import (
 
 // HealthMetrics represents health information for a device
 type HealthMetrics struct {
-	DeviceID          string                 `json:"device_id"`
-	Timestamp         int64                  `json:"timestamp"`
-	Uptime            time.Duration          `json:"uptime"`
-	CPUUsage          float64                `json:"cpu_usage"`
-	MemoryUsage       float64                `json:"memory_usage"`
-	NetworkStats      NetworkHealthStats     `json:"network_stats"`
-	MessageStats      MessageHealthStats     `json:"message_stats"`
-	SecurityStats     SecurityHealthStats    `json:"security_stats"`
-	BatteryLevel      *float64               `json:"battery_level,omitempty"`
-	SignalStrength    *int                   `json:"signal_strength,omitempty"`
-	CustomMetrics     map[string]interface{} `json:"custom_metrics,omitempty"`
+	DeviceID       string                 `json:"device_id"`
+	Timestamp      int64                  `json:"timestamp"`
+	Uptime         time.Duration          `json:"uptime"`
+	CPUUsage       float64                `json:"cpu_usage"`
+	MemoryUsage    float64                `json:"memory_usage"`
+	NetworkStats   NetworkHealthStats     `json:"network_stats"`
+	MessageStats   MessageHealthStats     `json:"message_stats"`
+	SecurityStats  SecurityHealthStats    `json:"security_stats"`
+	BatteryLevel   *float64               `json:"battery_level,omitempty"`
+	SignalStrength *int                   `json:"signal_strength,omitempty"`
+	CustomMetrics  map[string]interface{} `json:"custom_metrics,omitempty"`
 }
 
 // NetworkHealthStats tracks network-related health metrics
 type NetworkHealthStats struct {
-	BytesSent       uint64    `json:"bytes_sent"`
-	BytesReceived   uint64    `json:"bytes_received"`
-	PacketsDropped  uint64    `json:"packets_dropped"`
-	Latency         float64   `json:"latency_ms"`
-	LastSeen        time.Time `json:"last_seen"`
-	ConnectedDevices int      `json:"connected_devices"`
+	BytesSent        uint64    `json:"bytes_sent"`
+	BytesReceived    uint64    `json:"bytes_received"`
+	PacketsDropped   uint64    `json:"packets_dropped"`
+	Latency          float64   `json:"latency_ms"`
+	LastSeen         time.Time `json:"last_seen"`
+	ConnectedDevices int       `json:"connected_devices"`
 }
 
 // MessageHealthStats tracks message processing metrics
 type MessageHealthStats struct {
-	MessagesSent      uint64 `json:"messages_sent"`
-	MessagesReceived  uint64 `json:"messages_received"`
-	MessagesFailed    uint64 `json:"messages_failed"`
+	MessagesSent       uint64  `json:"messages_sent"`
+	MessagesReceived   uint64  `json:"messages_received"`
+	MessagesFailed     uint64  `json:"messages_failed"`
 	AverageProcessTime float64 `json:"avg_process_time_ms"`
-	QueueSize         int    `json:"queue_size"`
+	QueueSize          int     `json:"queue_size"`
 }
 
 // SecurityHealthStats tracks security-related metrics
 type SecurityHealthStats struct {
-	AuthenticationFailures uint64 `json:"auth_failures"`
-	RateLimitViolations   uint64 `json:"rate_limit_violations"`
-	TrustedDevicesCount   int    `json:"trusted_devices_count"`
-	LastPairingAttempt    *time.Time `json:"last_pairing_attempt,omitempty"`
+	AuthenticationFailures uint64     `json:"auth_failures"`
+	RateLimitViolations    uint64     `json:"rate_limit_violations"`
+	TrustedDevicesCount    int        `json:"trusted_devices_count"`
+	LastPairingAttempt     *time.Time `json:"last_pairing_attempt,omitempty"`
 }
 
 // HealthMonitor manages health metrics collection and reporting
 type HealthMonitor struct {
-	deviceID       string
-	startTime      time.Time
-	metrics        *HealthMetrics
-	mutex          sync.RWMutex
-	
+	deviceID  string
+	startTime time.Time
+	metrics   *HealthMetrics
+	mutex     sync.RWMutex
+
 	// Counters
 	messagesSent     uint64
 	messagesReceived uint64
 	messagesFailed   uint64
 	authFailures     uint64
 	rateLimitHits    uint64
-	
+
 	// Network tracking
-	bytesSent        uint64
-	bytesReceived    uint64
-	packetsDropped   uint64
-	
+	bytesSent      uint64
+	bytesReceived  uint64
+	packetsDropped uint64
+
 	// Custom metrics
-	customMetrics    map[string]interface{}
-	customMutex      sync.RWMutex
+	customMetrics map[string]interface{}
+	customMutex   sync.RWMutex
 }
 
 // NewHealthMonitor creates a new health monitoring instance
@@ -91,14 +91,14 @@ func (hm *HealthMonitor) UpdateMetrics(service *HomeLinkService) {
 	defer hm.mutex.Unlock()
 
 	now := time.Now()
-	
+
 	// Get memory stats
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
-	
+
 	// Calculate memory usage percentage (approximation)
 	memoryUsage := float64(memStats.Alloc) / float64(memStats.Sys) * 100
-	
+
 	// Get network stats from service
 	networkStats := hm.calculateNetworkStats(service)
 	messageStats := hm.calculateMessageStats()
@@ -130,7 +130,7 @@ func (hm *HealthMonitor) UpdateMetrics(service *HomeLinkService) {
 func (hm *HealthMonitor) calculateNetworkStats(service *HomeLinkService) NetworkHealthStats {
 	devices := service.GetDevices()
 	connectedDevices := 0
-	
+
 	// Count devices seen in last 5 minutes
 	cutoff := time.Now().Add(-5 * time.Minute)
 	for _, device := range devices {
@@ -154,7 +154,7 @@ func (hm *HealthMonitor) calculateMessageStats() MessageHealthStats {
 	queueSize := 0
 	// If we had access to the event channel, we could get its length
 	// queueSize = len(service.eventChan)
-	
+
 	return MessageHealthStats{
 		MessagesSent:       hm.messagesSent,
 		MessagesReceived:   hm.messagesReceived,
@@ -173,8 +173,8 @@ func (hm *HealthMonitor) calculateSecurityStats(service *HomeLinkService) Securi
 
 	return SecurityHealthStats{
 		AuthenticationFailures: hm.authFailures,
-		RateLimitViolations:   hm.rateLimitHits,
-		TrustedDevicesCount:   trustedCount,
+		RateLimitViolations:    hm.rateLimitHits,
+		TrustedDevicesCount:    trustedCount,
 	}
 }
 
@@ -197,11 +197,11 @@ func (hm *HealthMonitor) getCPUUsage() float64 {
 func (hm *HealthMonitor) GetMetrics() *HealthMetrics {
 	hm.mutex.RLock()
 	defer hm.mutex.RUnlock()
-	
+
 	if hm.metrics == nil {
 		return nil
 	}
-	
+
 	// Return a copy to prevent race conditions
 	metrics := *hm.metrics
 	return &metrics
@@ -279,7 +279,7 @@ func (hm *HealthMonitor) RemoveCustomMetric(key string) {
 func (hm *HealthMonitor) SetBatteryLevel(level float64) {
 	hm.mutex.Lock()
 	defer hm.mutex.Unlock()
-	
+
 	if hm.metrics != nil {
 		hm.metrics.BatteryLevel = &level
 	}
@@ -289,7 +289,7 @@ func (hm *HealthMonitor) SetBatteryLevel(level float64) {
 func (hm *HealthMonitor) SetSignalStrength(strength int) {
 	hm.mutex.Lock()
 	defer hm.mutex.Unlock()
-	
+
 	if hm.metrics != nil {
 		hm.metrics.SignalStrength = &strength
 	}
@@ -312,9 +312,9 @@ func (hm *HealthMonitor) GetHealthSummary() map[string]interface{} {
 		status = "warning"
 		issues = append(issues, "high memory usage")
 	}
-	
+
 	if metrics.CPUUsage > 80 {
-		status = "warning" 
+		status = "warning"
 		issues = append(issues, "high CPU usage")
 	}
 

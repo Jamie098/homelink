@@ -22,7 +22,7 @@ func (rl *RateLimiter) AllowMessage(deviceID string) bool {
 	defer rl.mutex.Unlock()
 
 	now := time.Now()
-	
+
 	// Get or create device rate info
 	rateInfo, exists := rl.deviceRates[deviceID]
 	if !exists {
@@ -36,7 +36,7 @@ func (rl *RateLimiter) AllowMessage(deviceID string) bool {
 	// Calculate tokens to add based on time elapsed
 	elapsed := now.Sub(rateInfo.lastRefill)
 	tokensToAdd := int(elapsed.Seconds() * float64(rl.maxRate))
-	
+
 	if tokensToAdd > 0 {
 		rateInfo.tokens += tokensToAdd
 		if rateInfo.tokens > rl.burstSize {

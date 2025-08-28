@@ -39,14 +39,14 @@ type Subscription struct {
 
 // SecurityConfig holds security-related configuration
 type SecurityConfig struct {
-	Enabled                bool          `json:"enabled"`
-	RequireAuthentication  bool          `json:"require_authentication"`
-	AllowedNetworkKey      string        `json:"allowed_network_key,omitempty"`
-	MaxMessageAge          time.Duration `json:"max_message_age"`
-	RateLimitPerSecond     int           `json:"rate_limit_per_second"`
-	RateLimitBurstSize     int           `json:"rate_limit_burst_size"`
-	AutoAcceptPairing      bool          `json:"auto_accept_pairing"`
-	RequireDeviceApproval  bool          `json:"require_device_approval"`
+	Enabled               bool          `json:"enabled"`
+	RequireAuthentication bool          `json:"require_authentication"`
+	AllowedNetworkKey     string        `json:"allowed_network_key,omitempty"`
+	MaxMessageAge         time.Duration `json:"max_message_age"`
+	RateLimitPerSecond    int           `json:"rate_limit_per_second"`
+	RateLimitBurstSize    int           `json:"rate_limit_burst_size"`
+	AutoAcceptPairing     bool          `json:"auto_accept_pairing"`
+	RequireDeviceApproval bool          `json:"require_device_approval"`
 }
 
 // RateLimiter tracks message rates from devices
@@ -59,7 +59,7 @@ type RateLimiter struct {
 
 // DeviceRateInfo tracks rate limiting info for a specific device
 type DeviceRateInfo struct {
-	tokens    int
+	tokens     int
 	lastRefill time.Time
 }
 

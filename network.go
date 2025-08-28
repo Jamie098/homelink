@@ -144,7 +144,7 @@ func (s *HomeLinkService) broadcastMessage(msg Message) error {
 	} else {
 		data, err = json.Marshal(msg)
 	}
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to marshal message: %v", err)
 	}
@@ -297,7 +297,7 @@ func (s *HomeLinkService) sendDirectMessage(msg *Message, addr *net.UDPAddr) err
 	} else {
 		data, err = json.Marshal(msg)
 	}
-	
+
 	if err != nil {
 		return fmt.Errorf("failed to marshal message: %v", err)
 	}
