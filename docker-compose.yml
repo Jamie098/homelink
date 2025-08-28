@@ -1,0 +1,131 @@
+version: '3.9'
+
+services:
+  # HomeLink Service - Local device communication protocol
+  homelink:
+    build: 
+      context: .
+      dockerfile: dockerfile
+    container_name: homelink-service
+    restart: unless-stopped
+    ports:
+      - "8080:8080/udp"  # HomeLink protocol (UDP multicast)
+      - "8081:8081"      # HomeLink HTTP API
+    environment:
+      # Basic HomeLink configuration
+      - HOMELINK_DEVICE_ID=homelink-docker
+      - HOMELINK_DEVICE_NAME=HomeLink Docker Service
+      - HOMELINK_CAPABILITIES=event_publisher,api,frigate_integration
+      - HOMELINK_API_PORT=8081
+      
+      # Frigate integration settings
+      - HOMELINK_FRIGATE_ENABLED=true
+      - HOMELINK_FRIGATE_BASE_URL=http://frigate:5000
+      - HOMELINK_FRIGATE_SNAPSHOT_CACHE=true
+      - HOMELINK_FRIGATE_CACHE_DIR=/app/frigate_snapshots
+      - HOMELINK_FRIGATE_CACHE_TTL=24h
+      - HOMELINK_FRIGATE_NOTIFY_EVENTS=new
+      - HOMELINK_FRIGATE_NOTIFY_LABELS=person,car,dog,cat
+      - HOMELINK_FRIGATE_MIN_SCORE=0.7
+      - HOMELINK_FRIGATE_IGNORE_FALSE_POSITIVES=true
+      - HOMELINK_FRIGATE_WEBHOOK_SECRET=your-webhook-secret-here
+      
+      # Optional: Security settings (uncomment if needed)
+      # - HOMELINK_SECURITY_ENABLED=true
+      # - HOMELINK_REQUIRE_AUTH=true
+      # - HOMELINK_API_KEY=your-api-key-here
+      
+      # Optional: Event storage (uncomment if needed)
+      # - HOMELINK_STORAGE_ENABLED=true
+      # - HOMELINK_DATABASE_PATH=/app/data/homelink_events.db
+      # - HOMELINK_RETENTION_DAYS=30
+    volumes:
+      - homelink_snapshots:/app/frigate_snapshots
+      - homelink_data:/app/data
+    networks:
+      - homelink_network
+    depends_on:
+      - frigate
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Frigate NVR - Object detection and recording
+  frigate:
+    container_name: frigate
+    privileged: true # this may not be necessary for all setups
+    restart: unless-stopped
+    image: ghcr.io/blakeblackshear/frigate:stable
+    shm_size: "64mb" # update for your cameras based on detection resolution
+    devices:
+      # - /dev/bus/usb:/dev/bus/usb  # Passes the USB Coral, needs to be modified for other versions
+      # - /dev/apex_0:/dev/apex_0    # Passes a PCIe Coral, follow driver instructions
+      # - /dev/video11:/dev/video11  # For Raspberry Pi 4B
+      # - /dev/dri/renderD128:/dev/dri/renderD128 # For intel hwaccel, needs to be updated for your hardware
+    volumes:
+      - /etc/localtime:/etc/localtime:ro
+      - frigate_config:/config
+      - frigate_storage:/media/frigate
+      - type: tmpfs # Optional: 1GB of memory, reduces SSD/SD Card wear
+        target: /tmp/cache
+        tmpfs:
+          size: 1000000000
+    ports:
+      - "5000:5000"
+      - "8554:8554" # RTSP feeds
+      - "8555:8555/tcp" # WebRTC over tcp
+      - "8555:8555/udp" # WebRTC over udp
+    environment:
+      FRIGATE_RTSP_PASSWORD: "password"
+    networks:
+      - homelink_network
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:5000/api/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Optional: MQTT Broker for Frigate (uncomment if you want MQTT integration)
+  # mosquitto:
+  #   container_name: mosquitto
+  #   image: eclipse-mosquitto:2.0
+  #   restart: unless-stopped
+  #   ports:
+  #     - "1883:1883"
+  #     - "9001:9001"
+  #   volumes:
+  #     - mosquitto_config:/mosquitto/config
+  #     - mosquitto_data:/mosquitto/data
+  #     - mosquitto_logs:/mosquitto/log
+  #   networks:
+  #     - homelink_network
+
+volumes:
+  # HomeLink data
+  homelink_snapshots:
+    driver: local
+  homelink_data:
+    driver: local
+    
+  # Frigate data
+  frigate_config:
+    driver: local
+  frigate_storage:
+    driver: local
+    
+  # Optional: MQTT data (uncomment if using MQTT)
+  # mosquitto_config:
+  #   driver: local
+  # mosquitto_data:
+  #   driver: local
+  # mosquitto_logs:
+  #   driver: local
+
+networks:
+  homelink_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16

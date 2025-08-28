@@ -67,6 +67,25 @@ func main() {
 	backupIntervalStr := getEnv("HOMELINK_BACKUP_INTERVAL", "24h")
 	backupInterval, _ := time.ParseDuration(backupIntervalStr)
 
+	// Frigate integration configuration
+	frigateEnabled := getEnv("HOMELINK_FRIGATE_ENABLED", "false") == "true"
+	frigateBaseURL := getEnv("HOMELINK_FRIGATE_BASE_URL", "http://localhost:5000")
+	frigateSnapshotCache := getEnv("HOMELINK_FRIGATE_SNAPSHOT_CACHE", "true") == "true"
+	frigateSnapshotCacheDir := getEnv("HOMELINK_FRIGATE_CACHE_DIR", "./frigate_snapshots")
+	frigateSnapshotCacheTTLStr := getEnv("HOMELINK_FRIGATE_CACHE_TTL", "24h")
+	frigateSnapshotCacheTTL, _ := time.ParseDuration(frigateSnapshotCacheTTLStr)
+	frigateNotifyOnEvents := strings.Split(getEnv("HOMELINK_FRIGATE_NOTIFY_EVENTS", "new"), ",")
+	frigateNotifyOnLabels := strings.Split(getEnv("HOMELINK_FRIGATE_NOTIFY_LABELS", ""), ",")
+	frigateMinimumScore, _ := strconv.ParseFloat(getEnv("HOMELINK_FRIGATE_MIN_SCORE", "0.7"), 64)
+	frigateIgnoreFalsePositives := getEnv("HOMELINK_FRIGATE_IGNORE_FALSE_POSITIVES", "true") == "true"
+	frigateZoneFilter := strings.Split(getEnv("HOMELINK_FRIGATE_ZONE_FILTER", ""), ",")
+	frigateWebhookSecret := getEnv("HOMELINK_FRIGATE_WEBHOOK_SECRET", "")
+
+	// Clean up empty strings from comma-separated lists
+	frigateNotifyOnEvents = filterEmptyStrings(frigateNotifyOnEvents)
+	frigateNotifyOnLabels = filterEmptyStrings(frigateNotifyOnLabels)
+	frigateZoneFilter = filterEmptyStrings(frigateZoneFilter)
+
 	// Parse capabilities
 	capabilities := strings.Split(capabilitiesStr, ",")
 	for i, cap := range capabilities {
@@ -131,6 +150,28 @@ func main() {
 	// Start the HomeLink protocol service
 	if err := service.Start(); err != nil {
 		log.Fatalf("Failed to start HomeLink service: %v", err)
+	}
+
+	// Enable Frigate integration if configured
+	if frigateEnabled {
+		frigateConfig := &homelink.FrigateConfig{
+			Enabled:              frigateEnabled,
+			FrigateBaseURL:       frigateBaseURL,
+			SnapshotCache:        frigateSnapshotCache,
+			SnapshotCacheDir:     frigateSnapshotCacheDir,
+			SnapshotCacheTTL:     frigateSnapshotCacheTTL,
+			NotifyOnEvents:       frigateNotifyOnEvents,
+			NotifyOnLabels:       frigateNotifyOnLabels,
+			MinimumScore:         frigateMinimumScore,
+			IgnoreFalsePositives: frigateIgnoreFalsePositives,
+			ZoneFilter:           frigateZoneFilter,
+			WebhookSecret:        frigateWebhookSecret,
+		}
+
+		if err := service.EnableFrigateIntegration(frigateConfig); err != nil {
+			log.Fatalf("Failed to enable Frigate integration: %v", err)
+		}
+		log.Printf("Frigate integration enabled: %s", frigateBaseURL)
 	}
 
 	// Start HTTP API server for event publishing
@@ -250,6 +291,19 @@ func startHTTPAPI(service *homelink.HomeLinkService, port string) {
 		eventAggregatesHandler(w, r, service)
 	}))
 
+	// Frigate integration endpoints
+	if service.IsFrigateEnabled() {
+		frigate := service.GetFrigateIntegration()
+		// Webhook endpoint (no auth required - handled by webhook secret)
+		http.HandleFunc("/frigate/webhook", frigate.HandleWebhook)
+		// Snapshot serving endpoint
+		http.HandleFunc("/frigate/snapshot/", frigate.ServeSnapshot)
+		// Stats endpoint
+		http.HandleFunc("/frigate/stats", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+			frigateStatsHandler(w, r, service)
+		}))
+	}
+
 	log.Printf("HTTP API server starting on port %s", port)
 	log.Printf("  GET  /dashboard            - Web dashboard")
 	log.Printf("  POST /publish              - Publish events")
@@ -278,6 +332,12 @@ func startHTTPAPI(service *homelink.HomeLinkService, port string) {
 		log.Printf("  POST /security/trust    - Add trusted device")
 		log.Printf("  POST /security/untrust  - Remove trusted device")
 		log.Printf("  GET  /security/stats    - Security statistics")
+	}
+
+	if service.IsFrigateEnabled() {
+		log.Printf("  POST /frigate/webhook      - Frigate event webhook")
+		log.Printf("  GET  /frigate/snapshot/*   - Serve cached snapshots")
+		log.Printf("  GET  /frigate/stats        - Frigate integration statistics")
 	}
 
 	if apiKey != "" {
@@ -1426,6 +1486,49 @@ func eventAggregatesHandler(w http.ResponseWriter, r *http.Request, service *hom
 			"end":   endTime.Format(time.RFC3339),
 		},
 	})
+}
+
+// frigateStatsHandler returns Frigate integration statistics
+func frigateStatsHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Only GET method allowed",
+		})
+		return
+	}
+
+	if !service.IsFrigateEnabled() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Frigate integration not enabled",
+		})
+		return
+	}
+
+	stats := service.GetFrigateStats()
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"stats":   stats,
+	})
+}
+
+// filterEmptyStrings removes empty strings from a slice
+func filterEmptyStrings(slice []string) []string {
+	var result []string
+	for _, s := range slice {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			result = append(result, s)
+		}
+	}
+	return result
 }
 
 // getEnv gets an environment variable with a default value

@@ -46,6 +46,7 @@ type HomeLinkService struct {
 	filteringSystem     *FilteringSystem
 	notificationService *NotificationService
 	eventStorage        *EventStorage
+	frigateIntegration  *FrigateIntegration
 
 	// Channels for internal communication
 	eventChan chan Event
@@ -654,4 +655,62 @@ func (s *HomeLinkService) GetStorageStats() StorageStats {
 // IsStorageEnabled returns whether event storage is enabled
 func (s *HomeLinkService) IsStorageEnabled() bool {
 	return s.eventStorage != nil && s.eventStorage.IsEnabled()
+}
+
+// Frigate integration methods
+
+// EnableFrigateIntegration enables Frigate NVR integration
+func (s *HomeLinkService) EnableFrigateIntegration(config *FrigateConfig) error {
+	if s.frigateIntegration != nil {
+		return fmt.Errorf("Frigate integration already enabled")
+	}
+	
+	if !config.Enabled {
+		return fmt.Errorf("Frigate integration not enabled in config")
+	}
+	
+	s.frigateIntegration = NewFrigateIntegration(config, s)
+	log.Printf("Frigate integration enabled: %s", config.FrigateBaseURL)
+	
+	// Start cleanup routine for expired snapshots
+	go s.frigateSnapshotCleanup()
+	
+	return nil
+}
+
+// frigateSnapshotCleanup runs periodic cleanup of expired snapshots
+func (s *HomeLinkService) frigateSnapshotCleanup() {
+	ticker := time.NewTicker(1 * time.Hour) // Clean up every hour
+	defer ticker.Stop()
+	
+	for {
+		select {
+		case <-ticker.C:
+			if s.frigateIntegration != nil {
+				s.frigateIntegration.CleanupExpiredSnapshots()
+			}
+		case <-s.stopChan:
+			return
+		}
+	}
+}
+
+// GetFrigateIntegration returns the Frigate integration instance
+func (s *HomeLinkService) GetFrigateIntegration() *FrigateIntegration {
+	return s.frigateIntegration
+}
+
+// IsFrigateEnabled returns whether Frigate integration is enabled
+func (s *HomeLinkService) IsFrigateEnabled() bool {
+	return s.frigateIntegration != nil
+}
+
+// GetFrigateStats returns Frigate integration statistics
+func (s *HomeLinkService) GetFrigateStats() map[string]interface{} {
+	if s.frigateIntegration == nil {
+		return map[string]interface{}{
+			"enabled": false,
+		}
+	}
+	return s.frigateIntegration.GetStats()
 }
