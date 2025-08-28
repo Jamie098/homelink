@@ -46,6 +46,64 @@ func (s *HomeLinkService) handleDeviceAnnouncement(msg *Message, addr *net.UDPAd
 	s.devices[device.ID] = device
 }
 
+// handleSecureDeviceAnnouncement processes device announcements from authenticated devices
+func (s *HomeLinkService) handleSecureDeviceAnnouncement(msg *Message, addr *net.UDPAddr, senderID string) {
+	// Only process announcements from trusted devices
+	trustedDevices := s.security.GetTrustedDevices()
+	trusted := false
+	for _, deviceID := range trustedDevices {
+		if deviceID == senderID {
+			trusted = true
+			break
+		}
+	}
+
+	if !trusted {
+		log.Printf("Ignoring announcement from untrusted device: %s", senderID)
+		return
+	}
+
+	// Parse device data from message
+	deviceData, ok := msg.Data.(map[string]interface{})
+	if !ok {
+		log.Printf("Invalid secure device announcement data")
+		return
+	}
+
+	// Create or update device
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	device := &Device{
+		ID:       msg.DeviceID,
+		Address:  addr,
+		LastSeen: time.Now(),
+		Metadata: make(map[string]string),
+		Trusted:  true,
+		AuthTime: time.Now(),
+	}
+
+	// Extract device information
+	if name, ok := deviceData["name"].(string); ok {
+		device.Name = name
+	}
+
+	if caps, ok := deviceData["capabilities"].([]interface{}); ok {
+		device.Capabilities = make([]string, len(caps))
+		for i, cap := range caps {
+			if capStr, ok := cap.(string); ok {
+				device.Capabilities[i] = capStr
+			}
+		}
+	}
+
+	// Get public key from security manager
+	device.PublicKey = s.security.GetPublicKey()
+
+	s.devices[device.ID] = device
+	log.Printf("Updated trusted device: %s (%s)", device.Name, device.ID)
+}
+
 // handleDiscoveryRequest responds to discovery requests from new devices
 func (s *HomeLinkService) handleDiscoveryRequest(msg *Message, addr *net.UDPAddr) {
 	log.Printf("Received discovery request from %s, announcing ourselves", msg.DeviceID)

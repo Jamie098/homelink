@@ -172,12 +172,3 @@ func main() {
 		}
 	}
 }
-
-// Example scenarios to try:
-// 1. Run this CLI in two terminals
-// 2. In terminal 1: start "My Phone"
-// 3. In terminal 2: start "Frigate Server"
-// 4. In both terminals: devices (should see each other)
-// 5. In terminal 1: subscribe motion_detection,person_detection
-// 6. In terminal 2: event motion_detection "Motion detected at front door"
-// 7. Check terminal 1 for the received event

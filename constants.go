@@ -20,4 +20,6 @@ const (
 	MSG_SUBSCRIBE           MessageType = "subscribe"
 	MSG_EVENT               MessageType = "event"
 	MSG_HEARTBEAT           MessageType = "heartbeat"
+	MSG_PAIRING_REQUEST     MessageType = "pairing_request"
+	MSG_PAIRING_RESPONSE    MessageType = "pairing_response"
 )

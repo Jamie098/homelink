@@ -5,6 +5,7 @@ package homelink
 
 import (
 	"net"
+	"sync"
 	"time"
 )
 
@@ -25,10 +26,47 @@ type Device struct {
 	Address      *net.UDPAddr      `json:"-"` // Don't serialize network address
 	LastSeen     time.Time         `json:"last_seen"`
 	Metadata     map[string]string `json:"metadata"`
+	PublicKey    string            `json:"public_key,omitempty"` // Base64 encoded Ed25519 public key
+	Trusted      bool              `json:"trusted"`              // Whether this device is trusted
+	AuthTime     time.Time         `json:"auth_time,omitempty"`  // When device was authenticated
 }
 
 // Subscription represents what events a device wants to receive
 type Subscription struct {
 	DeviceID   string   `json:"device_id"`
 	EventTypes []string `json:"event_types"`
+}
+
+// SecurityConfig holds security-related configuration
+type SecurityConfig struct {
+	Enabled                bool          `json:"enabled"`
+	RequireAuthentication  bool          `json:"require_authentication"`
+	AllowedNetworkKey      string        `json:"allowed_network_key,omitempty"`
+	MaxMessageAge          time.Duration `json:"max_message_age"`
+	RateLimitPerSecond     int           `json:"rate_limit_per_second"`
+	RateLimitBurstSize     int           `json:"rate_limit_burst_size"`
+	AutoAcceptPairing      bool          `json:"auto_accept_pairing"`
+	RequireDeviceApproval  bool          `json:"require_device_approval"`
+}
+
+// RateLimiter tracks message rates from devices
+type RateLimiter struct {
+	deviceRates map[string]*DeviceRateInfo
+	mutex       sync.RWMutex
+	maxRate     int
+	burstSize   int
+}
+
+// DeviceRateInfo tracks rate limiting info for a specific device
+type DeviceRateInfo struct {
+	tokens    int
+	lastRefill time.Time
+}
+
+// AuthenticationResult represents the result of device authentication
+type AuthenticationResult struct {
+	Authenticated bool
+	DeviceID      string
+	PublicKey     string
+	Error         error
 }

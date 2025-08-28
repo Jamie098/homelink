@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"fmt"
 	"homelink"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -26,12 +28,31 @@ type APIResponse struct {
 	Message string `json:"message"`
 }
 
+// SecurityRequest represents security-related API requests
+type SecurityRequest struct {
+	DeviceID  string `json:"device_id"`
+	PublicKey string `json:"public_key"`
+	QRCode    string `json:"qr_code"`
+}
+
+// Global API key for simple authentication
+var apiKey string
+
 func main() {
 	// Get configuration from environment variables
 	deviceID := getEnv("HOMELINK_DEVICE_ID", "homelink-service")
 	deviceName := getEnv("HOMELINK_DEVICE_NAME", "Generic HomeLink Service")
 	capabilitiesStr := getEnv("HOMELINK_CAPABILITIES", "event_publisher,api")
 	apiPort := getEnv("HOMELINK_API_PORT", "8081")
+	apiKey = getEnv("HOMELINK_API_KEY", "")
+
+	// Security configuration
+	securityEnabled := getEnv("HOMELINK_SECURITY_ENABLED", "false") == "true"
+	requireAuth := getEnv("HOMELINK_REQUIRE_AUTH", "true") == "true"
+	networkKey := getEnv("HOMELINK_NETWORK_KEY", "")
+	rateLimit, _ := strconv.Atoi(getEnv("HOMELINK_RATE_LIMIT", "10"))
+	burstSize, _ := strconv.Atoi(getEnv("HOMELINK_BURST_SIZE", "20"))
+	autoAcceptPairing := getEnv("HOMELINK_AUTO_ACCEPT_PAIRING", "false") == "true"
 
 	// Parse capabilities
 	capabilities := strings.Split(capabilitiesStr, ",")
@@ -44,9 +65,31 @@ func main() {
 	log.Printf("  Device Name: %s", deviceName)
 	log.Printf("  Capabilities: %v", capabilities)
 	log.Printf("  API Port: %s", apiPort)
+	log.Printf("  Security Enabled: %t", securityEnabled)
 
-	// Create a HomeLink service instance
-	service := homelink.NewHomeLinkService(deviceID, deviceName, capabilities)
+	var service *homelink.HomeLinkService
+	var err error
+
+	// Create service with or without security
+	if securityEnabled {
+		config := &homelink.SecurityConfig{
+			Enabled:                securityEnabled,
+			RequireAuthentication:  requireAuth,
+			AllowedNetworkKey:      networkKey,
+			MaxMessageAge:          5 * time.Minute,
+			RateLimitPerSecond:     rateLimit,
+			RateLimitBurstSize:     burstSize,
+			AutoAcceptPairing:      autoAcceptPairing,
+			RequireDeviceApproval:  !autoAcceptPairing,
+		}
+		service, err = homelink.NewSecureHomeLinkService(deviceID, deviceName, capabilities, config)
+	} else {
+		service = homelink.NewHomeLinkService(deviceID, deviceName, capabilities)
+	}
+
+	if err != nil {
+		log.Fatalf("Failed to create HomeLink service: %v", err)
+	}
 
 	// Start the HomeLink protocol service
 	if err := service.Start(); err != nil {
@@ -69,34 +112,104 @@ func main() {
 
 // startHTTPAPI starts the HTTP API server for event publishing
 func startHTTPAPI(service *homelink.HomeLinkService, port string) {
+	// Public endpoints (no auth required)
 	http.HandleFunc("/", rootHandler)
 	http.HandleFunc("/health", healthHandler)
-	http.HandleFunc("/publish", func(w http.ResponseWriter, r *http.Request) {
+
+	// Protected endpoints (require API key if set)
+	http.HandleFunc("/publish", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		publishEventHandler(w, r, service)
-	})
-	http.HandleFunc("/devices", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	http.HandleFunc("/devices", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		devicesHandler(w, r, service)
-	})
-	http.HandleFunc("/subscribe", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	http.HandleFunc("/subscribe", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		subscribeHandler(w, r, service)
-	})
-	http.HandleFunc("/discovery", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	http.HandleFunc("/discovery", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		discoveryHandler(w, r, service)
-	})
-	http.HandleFunc("/stats", func(w http.ResponseWriter, r *http.Request) {
+	}))
+	http.HandleFunc("/stats", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		statsHandler(w, r, service)
-	})
+	}))
+
+	// Security endpoints
+	if service.IsSecurityEnabled() {
+		http.HandleFunc("/security/qr-code", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+			securityQRCodeHandler(w, r, service)
+		}))
+		http.HandleFunc("/security/pair", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+			securityPairHandler(w, r, service)
+		}))
+		http.HandleFunc("/security/trust", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+			securityTrustHandler(w, r, service)
+		}))
+		http.HandleFunc("/security/untrust", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+			securityUntrustHandler(w, r, service)
+		}))
+		http.HandleFunc("/security/stats", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+			securityStatsHandler(w, r, service)
+		}))
+	}
 
 	log.Printf("HTTP API server starting on port %s", port)
-	log.Printf("  POST /publish    - Publish events")
-	log.Printf("  GET  /devices    - List discovered devices")
-	log.Printf("  POST /subscribe  - Subscribe to event types")
-	log.Printf("  POST /discovery  - Trigger device discovery")
-	log.Printf("  GET  /stats      - Discovery statistics")
-	log.Printf("  GET  /health     - Health check")
+	log.Printf("  POST /publish       - Publish events")
+	log.Printf("  GET  /devices       - List discovered devices")
+	log.Printf("  POST /subscribe     - Subscribe to event types")
+	log.Printf("  POST /discovery     - Trigger device discovery")
+	log.Printf("  GET  /stats         - Discovery statistics")
+	log.Printf("  GET  /health        - Health check")
+
+	if service.IsSecurityEnabled() {
+		log.Printf("  GET  /security/qr-code  - Generate QR pairing code")
+		log.Printf("  POST /security/pair     - Pair with device via QR code")
+		log.Printf("  POST /security/trust    - Add trusted device")
+		log.Printf("  POST /security/untrust  - Remove trusted device")
+		log.Printf("  GET  /security/stats    - Security statistics")
+	}
+
+	if apiKey != "" {
+		log.Printf("API authentication enabled (use X-API-Key header)")
+	}
 
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatalf("HTTP server failed: %v", err)
+	}
+}
+
+// authMiddleware provides simple API key authentication
+func authMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		// Skip auth if no API key is configured
+		if apiKey == "" {
+			next(w, r)
+			return
+		}
+
+		// Check for API key in header
+		providedKey := r.Header.Get("X-API-Key")
+		if providedKey == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(APIResponse{
+				Success: false,
+				Message: "API key required (use X-API-Key header)",
+			})
+			return
+		}
+
+		// Use constant-time comparison to prevent timing attacks
+		if subtle.ConstantTimeCompare([]byte(providedKey), []byte(apiKey)) != 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			json.NewEncoder(w).Encode(APIResponse{
+				Success: false,
+				Message: "Invalid API key",
+			})
+			return
+		}
+
+		next(w, r)
 	}
 }
 
@@ -361,6 +474,247 @@ func statsHandler(w http.ResponseWriter, r *http.Request, service *homelink.Home
 	}
 
 	stats := service.GetDiscoveryStats()
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"stats":   stats,
+	})
+}
+
+// Security API handlers
+
+// securityQRCodeHandler generates a QR pairing code
+func securityQRCodeHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Only GET method allowed",
+		})
+		return
+	}
+
+	if !service.IsSecurityEnabled() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Security not enabled",
+		})
+		return
+	}
+
+	qrCode, err := service.GenerateQRPairingCode()
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Failed to generate QR code: " + err.Error(),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"qr_code": qrCode,
+		"message": "QR pairing code generated. Share with other devices to allow pairing.",
+	})
+}
+
+// securityPairHandler pairs with a device via QR code
+func securityPairHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Only POST method allowed",
+		})
+		return
+	}
+
+	if !service.IsSecurityEnabled() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Security not enabled",
+		})
+		return
+	}
+
+	var secReq SecurityRequest
+	if err := json.NewDecoder(r.Body).Decode(&secReq); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Invalid JSON payload: " + err.Error(),
+		})
+		return
+	}
+
+	if secReq.QRCode == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "qr_code is required",
+		})
+		return
+	}
+
+	if err := service.ParseQRPairingCode(secReq.QRCode); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Failed to pair with device: " + err.Error(),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(APIResponse{
+		Success: true,
+		Message: "Successfully paired with device",
+	})
+}
+
+// securityTrustHandler adds a trusted device
+func securityTrustHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Only POST method allowed",
+		})
+		return
+	}
+
+	if !service.IsSecurityEnabled() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Security not enabled",
+		})
+		return
+	}
+
+	var secReq SecurityRequest
+	if err := json.NewDecoder(r.Body).Decode(&secReq); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Invalid JSON payload: " + err.Error(),
+		})
+		return
+	}
+
+	if secReq.DeviceID == "" || secReq.PublicKey == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "device_id and public_key are required",
+		})
+		return
+	}
+
+	if err := service.AddTrustedDevice(secReq.DeviceID, secReq.PublicKey); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Failed to add trusted device: " + err.Error(),
+		})
+		return
+	}
+
+	log.Printf("Added trusted device via API: %s", secReq.DeviceID)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(APIResponse{
+		Success: true,
+		Message: "Device added to trusted list",
+	})
+}
+
+// securityUntrustHandler removes a trusted device
+func securityUntrustHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Only POST method allowed",
+		})
+		return
+	}
+
+	if !service.IsSecurityEnabled() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Security not enabled",
+		})
+		return
+	}
+
+	var secReq SecurityRequest
+	if err := json.NewDecoder(r.Body).Decode(&secReq); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Invalid JSON payload: " + err.Error(),
+		})
+		return
+	}
+
+	if secReq.DeviceID == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "device_id is required",
+		})
+		return
+	}
+
+	service.RemoveTrustedDevice(secReq.DeviceID)
+
+	log.Printf("Removed trusted device via API: %s", secReq.DeviceID)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(APIResponse{
+		Success: true,
+		Message: "Device removed from trusted list",
+	})
+}
+
+// securityStatsHandler returns security statistics
+func securityStatsHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Only GET method allowed",
+		})
+		return
+	}
+
+	if !service.IsSecurityEnabled() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Security not enabled",
+		})
+		return
+	}
+
+	stats := service.GetSecurityStats()
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
