@@ -4,8 +4,8 @@
 package homelink
 
 import (
+	"fmt"
 	"log"
-	"time"
 )
 
 // Event represents something that happened (like motion detection)
@@ -40,16 +40,12 @@ func (s *HomeLinkService) processEvents() {
 		case <-s.stopChan:
 			return
 		case event := <-s.eventChan:
-			msg := Message{
-				Type:      MSG_EVENT,
-				Version:   PROTOCOL_VERSION,
-				Timestamp: time.Now().Unix(),
-				DeviceID:  s.deviceID,
-				Data:      event,
+			msg := s.messageFactory.CreateEvent(event)
+			if err := s.broadcastMessage(msg); err != nil {
+				s.errorHandler.HandleNetworkError("broadcast event", err)
+			} else {
+				s.errorHandler.LogInfo("event", fmt.Sprintf("Event sent: %s - %s", event.EventType, event.Description))
 			}
-
-			s.broadcastMessage(msg)
-			log.Printf("Event sent: %s - %s", event.EventType, event.Description)
 		}
 	}
 }
@@ -90,15 +86,10 @@ func (s *HomeLinkService) handleSubscription(msg *Message) {
 
 // Subscribe to specific event types
 func (s *HomeLinkService) Subscribe(eventTypes []string) {
-	msg := Message{
-		Type:      MSG_SUBSCRIBE,
-		Version:   PROTOCOL_VERSION,
-		Timestamp: time.Now().Unix(),
-		DeviceID:  s.deviceID,
-		Data: map[string]interface{}{
-			"event_types": eventTypes,
-		},
+	msg := s.messageFactory.CreateSubscription(eventTypes)
+	if err := s.broadcastMessage(msg); err != nil {
+		s.errorHandler.HandleNetworkError("subscribe", err)
+	} else {
+		s.errorHandler.LogInfo("subscription", fmt.Sprintf("Subscribed to events: %v", eventTypes))
 	}
-	s.broadcastMessage(msg)
-	log.Printf("Subscribed to events: %v", eventTypes)
 }

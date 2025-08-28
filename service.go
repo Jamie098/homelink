@@ -47,6 +47,12 @@ type HomeLinkService struct {
 	notificationService *NotificationService
 	eventStorage        *EventStorage
 
+	// Utility components
+	messageFactory  *MessageFactory
+	errorHandler    *ErrorHandler
+	networkHelper   *NetworkHelper
+	configValidator *ConfigValidator
+
 	// Channels for internal communication
 	eventChan chan Event
 	stopChan  chan bool
@@ -55,15 +61,21 @@ type HomeLinkService struct {
 // NewHomeLinkService creates a new HomeLink protocol service
 func NewHomeLinkService(deviceID, deviceName string, capabilities []string) *HomeLinkService {
 	service := &HomeLinkService{
-		deviceID:      deviceID,
-		deviceName:    deviceName,
-		capabilities:  capabilities,
-		devices:       make(map[string]*Device),
-		subscriptions: make(map[string][]string),
-		eventChan:     make(chan Event, 100), // Buffer for events
-		stopChan:      make(chan bool),
-		protocolMode:  ProtocolJSON, // Default to JSON
+		deviceID:        deviceID,
+		deviceName:      deviceName,
+		capabilities:    capabilities,
+		devices:         make(map[string]*Device),
+		subscriptions:   make(map[string][]string),
+		eventChan:       make(chan Event, 100), // Buffer for events
+		stopChan:        make(chan bool),
+		protocolMode:    ProtocolJSON, // Default to JSON
+		messageFactory:  NewMessageFactory(deviceID),
+		errorHandler:    NewErrorHandler(deviceID),
+		configValidator: NewConfigValidator(),
 	}
+
+	// Initialize utility components that depend on error handler
+	service.networkHelper = NewNetworkHelper(service.errorHandler)
 
 	// Initialize health monitoring
 	service.healthMonitor = NewHealthMonitor(deviceID)
@@ -81,16 +93,22 @@ func NewHomeLinkService(deviceID, deviceName string, capabilities []string) *Hom
 // NewSecureHomeLinkService creates a new HomeLink service with security enabled
 func NewSecureHomeLinkService(deviceID, deviceName string, capabilities []string, config *SecurityConfig) (*HomeLinkService, error) {
 	service := &HomeLinkService{
-		deviceID:       deviceID,
-		deviceName:     deviceName,
-		capabilities:   capabilities,
-		devices:        make(map[string]*Device),
-		subscriptions:  make(map[string][]string),
-		securityConfig: config,
-		eventChan:      make(chan Event, 100),
-		stopChan:       make(chan bool),
-		protocolMode:   ProtocolJSON, // Default to JSON
+		deviceID:        deviceID,
+		deviceName:      deviceName,
+		capabilities:    capabilities,
+		devices:         make(map[string]*Device),
+		subscriptions:   make(map[string][]string),
+		securityConfig:  config,
+		eventChan:       make(chan Event, 100),
+		stopChan:        make(chan bool),
+		protocolMode:    ProtocolJSON, // Default to JSON
+		messageFactory:  NewMessageFactory(deviceID),
+		errorHandler:    NewErrorHandler(deviceID),
+		configValidator: NewConfigValidator(),
 	}
+
+	// Initialize utility components that depend on error handler
+	service.networkHelper = NewNetworkHelper(service.errorHandler)
 
 	// Initialize health monitoring
 	service.healthMonitor = NewHealthMonitor(deviceID)

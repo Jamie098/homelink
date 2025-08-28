@@ -4,6 +4,7 @@
 package homelink
 
 import (
+	"fmt"
 	"log"
 	"net"
 	"time"
@@ -125,33 +126,22 @@ func (s *HomeLinkService) handleHeartbeat(msg *Message, addr *net.UDPAddr) {
 
 // announceDevice broadcasts our presence to the network
 func (s *HomeLinkService) announceDevice() {
-	msg := Message{
-		Type:      MSG_DEVICE_ANNOUNCEMENT,
-		Version:   PROTOCOL_VERSION,
-		Timestamp: time.Now().Unix(),
-		DeviceID:  s.deviceID,
-		Data: map[string]interface{}{
-			"name":         s.deviceName,
-			"capabilities": s.capabilities,
-		},
+	msg := s.messageFactory.CreateDeviceAnnouncement(s.deviceName, s.capabilities)
+	if err := s.broadcastMessage(msg); err != nil {
+		s.errorHandler.HandleNetworkError("device announcement", err)
+	} else {
+		s.errorHandler.LogInfo("discovery", fmt.Sprintf("Announced device: %s", s.deviceName))
 	}
-
-	s.broadcastMessage(msg)
-	log.Printf("Announced device: %s", s.deviceName)
 }
 
 // requestDiscovery asks other devices on the network to announce themselves
 func (s *HomeLinkService) requestDiscovery() {
-	msg := Message{
-		Type:      MSG_DISCOVERY_REQUEST,
-		Version:   PROTOCOL_VERSION,
-		Timestamp: time.Now().Unix(),
-		DeviceID:  s.deviceID,
-		Data:      nil,
+	msg := s.messageFactory.CreateDiscoveryRequest()
+	if err := s.broadcastMessage(msg); err != nil {
+		s.errorHandler.HandleNetworkError("discovery request", err)
+	} else {
+		s.errorHandler.LogInfo("discovery", "Sent discovery request to find other devices")
 	}
-
-	s.broadcastMessage(msg)
-	log.Printf("Sent discovery request to find other devices")
 }
 
 // sendHeartbeats sends periodic heartbeats
