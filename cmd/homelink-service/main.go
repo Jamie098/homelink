@@ -54,24 +54,6 @@ func main() {
 	burstSize, _ := strconv.Atoi(getEnv("HOMELINK_BURST_SIZE", "20"))
 	autoAcceptPairing := getEnv("HOMELINK_AUTO_ACCEPT_PAIRING", "false") == "true"
 
-	// MQTT configuration
-	mqttEnabled := getEnv("HOMELINK_MQTT_ENABLED", "false") == "true"
-	mqttBroker := getEnv("HOMELINK_MQTT_BROKER", "mqtt://localhost:1883")
-	mqttUsername := getEnv("HOMELINK_MQTT_USERNAME", "")
-	mqttPassword := getEnv("HOMELINK_MQTT_PASSWORD", "")
-	mqttClientID := getEnv("HOMELINK_MQTT_CLIENT_ID", deviceID+"_mqtt")
-	mqttTopicPrefix := getEnv("HOMELINK_MQTT_TOPIC_PREFIX", "homelink")
-	haDiscoveryEnabled := getEnv("HOMELINK_HA_DISCOVERY", "true") == "true"
-	haDiscoveryPrefix := getEnv("HOMELINK_HA_DISCOVERY_PREFIX", "homeassistant")
-
-	// Notification configuration  
-	notificationEnabled := getEnv("HOMELINK_NOTIFICATIONS_ENABLED", "false") == "true"
-	webhookURL := getEnv("HOMELINK_WEBHOOK_URL", "")
-	discordWebhook := getEnv("HOMELINK_DISCORD_WEBHOOK", "")
-	slackWebhook := getEnv("HOMELINK_SLACK_WEBHOOK", "")
-	telegramToken := getEnv("HOMELINK_TELEGRAM_TOKEN", "")
-	telegramChatID := getEnv("HOMELINK_TELEGRAM_CHAT_ID", "")
-
 	// Storage configuration
 	storageEnabled := getEnv("HOMELINK_STORAGE_ENABLED", "false") == "true"
 	databasePath := getEnv("HOMELINK_DATABASE_PATH", "./homelink_events.db")
@@ -105,120 +87,18 @@ func main() {
 	var securityConfig *homelink.SecurityConfig
 	if securityEnabled {
 		securityConfig = &homelink.SecurityConfig{
-			Enabled:                securityEnabled,
-			RequireAuthentication:  requireAuth,
-			AllowedNetworkKey:      networkKey,
-			MaxMessageAge:          5 * time.Minute,
-			RateLimitPerSecond:     rateLimit,
-			RateLimitBurstSize:     burstSize,
-			AutoAcceptPairing:      autoAcceptPairing,
-			RequireDeviceApproval:  !autoAcceptPairing,
+			Enabled:               securityEnabled,
+			RequireAuthentication: requireAuth,
+			AllowedNetworkKey:     networkKey,
+			MaxMessageAge:         5 * time.Minute,
+			RateLimitPerSecond:    rateLimit,
+			RateLimitBurstSize:    burstSize,
+			AutoAcceptPairing:     autoAcceptPairing,
+			RequireDeviceApproval: !autoAcceptPairing,
 		}
 	}
 
-	// Prepare MQTT configuration
-	var mqttConfig *homelink.MQTTConfig
-	if mqttEnabled {
-		mqttConfig = &homelink.MQTTConfig{
-			Enabled:     true,
-			BrokerURL:   mqttBroker,
-			Username:    mqttUsername,
-			Password:    mqttPassword,
-			ClientID:    mqttClientID,
-			QoS:         1,
-			Retained:    true,
-			TopicPrefix: mqttTopicPrefix,
-			HADiscovery: homelink.HADiscoveryConfig{
-				Enabled:            haDiscoveryEnabled,
-				DiscoveryPrefix:    haDiscoveryPrefix,
-				NodeID:             deviceID,
-				DeviceName:         deviceName,
-				DeviceModel:        "HomeLink Protocol v1.0",
-				DeviceManufacturer: "HomeLink Project",
-				AutoExpiry:         300, // 5 minutes
-			},
-		}
-	}
-
-	// Prepare notification configuration
-	var notificationConfig *homelink.NotificationConfig
-	if notificationEnabled {
-		notificationConfig = &homelink.NotificationConfig{
-			Enabled:   true,
-			Webhooks:  []homelink.WebhookEndpoint{},
-			PushServices: []homelink.PushService{},
-		}
-
-		// Add webhooks if configured
-		if webhookURL != "" {
-			notificationConfig.Webhooks = append(notificationConfig.Webhooks, homelink.WebhookEndpoint{
-				Name:    "default_webhook",
-				URL:     webhookURL,
-				Enabled: true,
-				Headers: map[string]string{"Content-Type": "application/json"},
-			})
-		}
-
-		// Add Discord webhook if configured
-		if discordWebhook != "" {
-			notificationConfig.Webhooks = append(notificationConfig.Webhooks, homelink.WebhookEndpoint{
-				Name:    "discord",
-				URL:     discordWebhook,
-				Enabled: true,
-				Headers: map[string]string{"Content-Type": "application/json"},
-				Template: `{
-					"embeds": [{
-						"title": "HomeLink Event",
-						"description": "{{.Type}} from {{.DeviceID}}",
-						"color": 3447003,
-						"fields": [
-							{"name": "Device", "value": "{{.DeviceID}}", "inline": true},
-							{"name": "Type", "value": "{{.Type}}", "inline": true},
-							{"name": "Timestamp", "value": "{{.Timestamp}}", "inline": true}
-						]
-					}]
-				}`,
-			})
-		}
-
-		// Add Slack webhook if configured
-		if slackWebhook != "" {
-			notificationConfig.Webhooks = append(notificationConfig.Webhooks, homelink.WebhookEndpoint{
-				Name:    "slack",
-				URL:     slackWebhook,
-				Enabled: true,
-				Headers: map[string]string{"Content-Type": "application/json"},
-				Template: `{
-					"text": "HomeLink Event: {{.Type}} from {{.DeviceID}}",
-					"attachments": [{
-						"color": "good",
-						"fields": [
-							{"title": "Device", "value": "{{.DeviceID}}", "short": true},
-							{"title": "Type", "value": "{{.Type}}", "short": true},
-							{"title": "Time", "value": "{{.Timestamp}}", "short": true}
-						]
-					}]
-				}`,
-			})
-		}
-
-		// Add Telegram if configured
-		if telegramToken != "" && telegramChatID != "" {
-			notificationConfig.PushServices = append(notificationConfig.PushServices, homelink.PushService{
-				Name:     "telegram",
-				Type:     "telegram",
-				Enabled:  true,
-				Token:    telegramToken,
-				Endpoint: "https://api.telegram.org/bot" + telegramToken + "/sendMessage",
-				Config: map[string]interface{}{
-					"chat_id": telegramChatID,
-				},
-				Template: "🏠 *HomeLink Event*\n\n📱 Device: {{.DeviceID}}\n🔔 Type: {{.Type}}\n⏰ Time: {{.Timestamp}}",
-			})
-		}
-	}
-
-	// Prepare storage configuration
+	// Storage configuration
 	var storageConfig *homelink.StorageConfig
 	if storageEnabled {
 		if flushInterval == 0 {
@@ -242,7 +122,7 @@ func main() {
 	}
 
 	// Create service with advanced features
-	service, err = homelink.NewAdvancedHomeLinkService(deviceID, deviceName, capabilities, securityConfig, mqttConfig, notificationConfig, storageConfig)
+	service, err = homelink.NewAdvancedHomeLinkService(deviceID, deviceName, capabilities, securityConfig, storageConfig)
 
 	if err != nil {
 		log.Fatalf("Failed to create HomeLink service: %v", err)
@@ -271,11 +151,11 @@ func main() {
 func startHTTPAPI(service *homelink.HomeLinkService, port string) {
 	// Initialize dashboard
 	dashboard := homelink.NewDashboardServer(service, service.GetHealthMonitor())
-	
+
 	// Public endpoints (no auth required)
 	http.HandleFunc("/", rootHandler)
 	http.HandleFunc("/health", healthHandler)
-	
+
 	// Dashboard endpoints
 	dashboard.SetupRoutes(http.DefaultServeMux)
 
@@ -336,14 +216,6 @@ func startHTTPAPI(service *homelink.HomeLinkService, port string) {
 		protocolModeHandler(w, r, service)
 	}))
 
-	// Advanced feature endpoints - MQTT
-	http.HandleFunc("/mqtt/status", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		mqttStatusHandler(w, r, service)
-	}))
-	http.HandleFunc("/mqtt/stats", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		mqttStatsHandler(w, r, service)
-	}))
-
 	// Advanced feature endpoints - Event Filtering
 	http.HandleFunc("/filtering/stats", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		filteringStatsHandler(w, r, service)
@@ -365,22 +237,6 @@ func startHTTPAPI(service *homelink.HomeLinkService, port string) {
 	}))
 	http.HandleFunc("/notifications/test", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
 		testNotificationHandler(w, r, service)
-	}))
-
-	// Advanced feature endpoints - Frigate Integration
-	http.HandleFunc("/frigate/cameras", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "POST" {
-			addCameraHandler(w, r, service)
-		} else {
-			getCamerasHandler(w, r, service)
-		}
-	}))
-	http.HandleFunc("/frigate/automations", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method == "POST" {
-			addAutomationHandler(w, r, service)
-		} else {
-			getAutomationsHandler(w, r, service)
-		}
 	}))
 
 	// Advanced feature endpoints - Event Storage
@@ -407,15 +263,11 @@ func startHTTPAPI(service *homelink.HomeLinkService, port string) {
 	log.Printf("  GET  /health/summary       - Health summary")
 	log.Printf("  GET  /reliability/stats    - Reliability statistics")
 	log.Printf("  GET/POST /protocol/mode    - Protocol mode management")
-	log.Printf("  GET  /mqtt/status          - MQTT connection status")
-	log.Printf("  GET  /mqtt/stats           - MQTT bridge statistics")
 	log.Printf("  GET  /filtering/stats      - Event filtering statistics")
 	log.Printf("  GET/POST /filtering/filters - Event filter management")
 	log.Printf("  POST /filtering/remove     - Remove event filter")
 	log.Printf("  GET  /notifications/stats  - Notification statistics")
 	log.Printf("  POST /notifications/test   - Test notifications")
-	log.Printf("  GET/POST /frigate/cameras  - Frigate camera management")
-	log.Printf("  GET/POST /frigate/automations - Frigate automation rules")
 	log.Printf("  GET  /storage/stats        - Storage system statistics")
 	log.Printf("  POST /storage/query        - Query stored events")
 	log.Printf("  POST /storage/aggregates   - Get event aggregates")
@@ -1216,55 +1068,6 @@ func protocolModeHandler(w http.ResponseWriter, r *http.Request, service *homeli
 
 // Advanced Feature API Handlers
 
-// mqttStatusHandler returns MQTT connection status
-func mqttStatusHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
-	w.Header().Set("Content-Type", "application/json")
-
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(APIResponse{
-			Success: false,
-			Message: "Only GET method allowed",
-		})
-		return
-	}
-
-	connected := service.IsMQTTConnected()
-	status := "disconnected"
-	if connected {
-		status = "connected"
-	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":   true,
-		"connected": connected,
-		"status":    status,
-	})
-}
-
-// mqttStatsHandler returns MQTT bridge statistics
-func mqttStatsHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
-	w.Header().Set("Content-Type", "application/json")
-
-	if r.Method != http.MethodGet {
-		w.WriteHeader(http.StatusMethodNotAllowed)
-		json.NewEncoder(w).Encode(APIResponse{
-			Success: false,
-			Message: "Only GET method allowed",
-		})
-		return
-	}
-
-	stats := service.GetMQTTStats()
-	
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"stats":   stats,
-	})
-}
-
 // filteringStatsHandler returns event filtering statistics
 func filteringStatsHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
 	w.Header().Set("Content-Type", "application/json")
@@ -1279,7 +1082,7 @@ func filteringStatsHandler(w http.ResponseWriter, r *http.Request, service *home
 	}
 
 	stats := service.GetFilteringStats()
-	
+
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
@@ -1387,7 +1190,7 @@ func notificationStatsHandler(w http.ResponseWriter, r *http.Request, service *h
 	}
 
 	stats := service.GetNotificationStats()
-	
+
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
@@ -1418,7 +1221,7 @@ func testNotificationHandler(w http.ResponseWriter, r *http.Request, service *ho
 
 	// Create a test message
 	testMsg := &homelink.Message{
-		Type:      homelink.MSG_TEST,
+		Type:      homelink.MSG_EVENT,
 		DeviceID:  service.GetDeviceID(),
 		Timestamp: time.Now().Unix(),
 		Data:      map[string]interface{}{"message": testReq.Message},
@@ -1438,92 +1241,6 @@ func testNotificationHandler(w http.ResponseWriter, r *http.Request, service *ho
 	json.NewEncoder(w).Encode(APIResponse{
 		Success: true,
 		Message: "Test notification sent successfully",
-	})
-}
-
-// addCameraHandler adds a new Frigate camera configuration
-func addCameraHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
-	w.Header().Set("Content-Type", "application/json")
-
-	var camera homelink.CameraConfig
-	if err := json.NewDecoder(r.Body).Decode(&camera); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(APIResponse{
-			Success: false,
-			Message: "Invalid JSON payload: " + err.Error(),
-		})
-		return
-	}
-
-	if err := service.ConfigureFrigateCamera(camera); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(APIResponse{
-			Success: false,
-			Message: "Failed to add camera: " + err.Error(),
-		})
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(APIResponse{
-		Success: true,
-		Message: "Frigate camera configured successfully",
-	})
-}
-
-// getCamerasHandler returns all configured cameras
-func getCamerasHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
-	w.Header().Set("Content-Type", "application/json")
-
-	// This would require adding a GetCameras method to the service
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success": true,
-		"cameras": []interface{}{}, // Placeholder
-		"message": "Camera listing not yet implemented",
-	})
-}
-
-// addAutomationHandler adds a new Frigate automation rule
-func addAutomationHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
-	w.Header().Set("Content-Type", "application/json")
-
-	var automation homelink.AutomationRule
-	if err := json.NewDecoder(r.Body).Decode(&automation); err != nil {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(APIResponse{
-			Success: false,
-			Message: "Invalid JSON payload: " + err.Error(),
-		})
-		return
-	}
-
-	if err := service.AddFrigateAutomation(automation); err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(APIResponse{
-			Success: false,
-			Message: "Failed to add automation: " + err.Error(),
-		})
-		return
-	}
-
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(APIResponse{
-		Success: true,
-		Message: "Frigate automation rule added successfully",
-	})
-}
-
-// getAutomationsHandler returns all automation rules
-func getAutomationsHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
-	w.Header().Set("Content-Type", "application/json")
-
-	// This would require adding a GetAutomations method to the service
-	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(map[string]interface{}{
-		"success":     true,
-		"automations": []interface{}{}, // Placeholder
-		"message":     "Automation listing not yet implemented",
 	})
 }
 
@@ -1552,7 +1269,7 @@ func storageStatsHandler(w http.ResponseWriter, r *http.Request, service *homeli
 	}
 
 	stats := service.GetStorageStats()
-	
+
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"success": true,
@@ -1596,7 +1313,7 @@ func queryEventsHandler(w http.ResponseWriter, r *http.Request, service *homelin
 	if query.Limit == 0 {
 		query.Limit = 100
 	}
-	
+
 	// Enforce maximum limit to prevent performance issues
 	if query.Limit > 1000 {
 		query.Limit = 1000

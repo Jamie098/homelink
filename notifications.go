@@ -10,7 +10,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -18,21 +17,21 @@ import (
 
 // NotificationService manages all outbound notifications
 type NotificationService struct {
-	webhooks    []WebhookEndpoint
+	webhooks     []WebhookEndpoint
 	pushServices []PushService
-	client      *http.Client
-	mutex       sync.RWMutex
-	stats       NotificationStats
-	rateLimiter map[string]*NotificationRateLimit
+	client       *http.Client
+	mutex        sync.RWMutex
+	stats        NotificationStats
+	rateLimiter  map[string]*NotificationRateLimit
 }
 
 // WebhookEndpoint represents a webhook destination
 type WebhookEndpoint struct {
 	Name        string            `json:"name"`
 	URL         string            `json:"url"`
-	Method      string            `json:"method"`      // GET, POST, PUT
+	Method      string            `json:"method"` // GET, POST, PUT
 	Headers     map[string]string `json:"headers"`
-	Template    string            `json:"template"`    // JSON template for payload
+	Template    string            `json:"template"` // JSON template for payload
 	Enabled     bool              `json:"enabled"`
 	Timeout     time.Duration     `json:"timeout"`
 	Retries     int               `json:"retries"`
@@ -43,45 +42,45 @@ type WebhookEndpoint struct {
 // PushService represents a push notification service
 type PushService struct {
 	Name        string            `json:"name"`
-	Type        string            `json:"type"`        // ntfy, discord, slack, telegram
-	Config      map[string]string `json:"config"`      // Service-specific config
-	Template    string            `json:"template"`    // Message template
+	Type        string            `json:"type"`     // ntfy, discord, slack, telegram
+	Config      map[string]string `json:"config"`   // Service-specific config
+	Template    string            `json:"template"` // Message template
 	Enabled     bool              `json:"enabled"`
-	Priority    string            `json:"priority"`    // low, normal, high, emergency
+	Priority    string            `json:"priority"` // low, normal, high, emergency
 	EventFilter []string          `json:"event_filter"`
 }
 
 // NotificationStats tracks notification system performance
 type NotificationStats struct {
-	WebhooksSent      uint64            `json:"webhooks_sent"`
-	WebhooksFailed    uint64            `json:"webhooks_failed"`
-	PushNotificationsSent uint64        `json:"push_notifications_sent"`
-	PushNotificationsFailed uint64      `json:"push_notifications_failed"`
-	ByEndpoint        map[string]uint64 `json:"by_endpoint"`
-	LastReset         time.Time         `json:"last_reset"`
+	WebhooksSent            uint64            `json:"webhooks_sent"`
+	WebhooksFailed          uint64            `json:"webhooks_failed"`
+	PushNotificationsSent   uint64            `json:"push_notifications_sent"`
+	PushNotificationsFailed uint64            `json:"push_notifications_failed"`
+	ByEndpoint              map[string]uint64 `json:"by_endpoint"`
+	LastReset               time.Time         `json:"last_reset"`
 }
 
 // NotificationRateLimit tracks rate limiting per endpoint
 type NotificationRateLimit struct {
-	Count      int
+	Count       int
 	WindowStart time.Time
-	MaxPerHour int
+	MaxPerHour  int
 }
 
 // NotificationPayload represents data sent to notifications
 type NotificationPayload struct {
-	Event       *Message               `json:"event"`
-	Timestamp   time.Time              `json:"timestamp"`
-	DeviceName  string                 `json:"device_name"`
-	Priority    string                 `json:"priority"`
-	Summary     string                 `json:"summary"`
-	Details     map[string]interface{} `json:"details"`
+	Event       *Message                 `json:"event"`
+	Timestamp   time.Time                `json:"timestamp"`
+	DeviceName  string                   `json:"device_name"`
+	Priority    string                   `json:"priority"`
+	Summary     string                   `json:"summary"`
+	Details     map[string]interface{}   `json:"details"`
 	Attachments []NotificationAttachment `json:"attachments,omitempty"`
 }
 
 // NotificationAttachment represents files attached to notifications
 type NotificationAttachment struct {
-	Type     string `json:"type"`      // image, video, document
+	Type     string `json:"type"` // image, video, document
 	URL      string `json:"url"`
 	Data     []byte `json:"data"`
 	Filename string `json:"filename"`
@@ -117,7 +116,7 @@ func NewNotificationService() *NotificationService {
 func (ns *NotificationService) AddWebhook(webhook WebhookEndpoint) {
 	ns.mutex.Lock()
 	defer ns.mutex.Unlock()
-	
+
 	// Set defaults
 	if webhook.Method == "" {
 		webhook.Method = "POST"
@@ -131,10 +130,10 @@ func (ns *NotificationService) AddWebhook(webhook WebhookEndpoint) {
 	if webhook.RetryDelay == 0 {
 		webhook.RetryDelay = 1 * time.Second
 	}
-	
+
 	ns.webhooks = append(ns.webhooks, webhook)
 	ns.stats.ByEndpoint[webhook.Name] = 0
-	
+
 	log.Printf("Added webhook endpoint: %s (%s)", webhook.Name, webhook.URL)
 }
 
@@ -142,10 +141,10 @@ func (ns *NotificationService) AddWebhook(webhook WebhookEndpoint) {
 func (ns *NotificationService) AddPushService(service PushService) {
 	ns.mutex.Lock()
 	defer ns.mutex.Unlock()
-	
+
 	ns.pushServices = append(ns.pushServices, service)
 	ns.stats.ByEndpoint[service.Name] = 0
-	
+
 	log.Printf("Added push service: %s (%s)", service.Name, service.Type)
 }
 
@@ -159,15 +158,15 @@ func (ns *NotificationService) SendNotification(event *Message, priority string,
 		Summary:    ns.generateSummary(event),
 		Details:    ns.extractDetails(event),
 	}
-	
-	// Add attachments if available (e.g., Frigate snapshots)
+
+	// Add attachments if available (e.g., security camera snapshots)
 	if attachments := ns.extractAttachments(event); len(attachments) > 0 {
 		payload.Attachments = attachments
 	}
-	
+
 	// Send to webhooks
 	ns.sendToWebhooks(payload)
-	
+
 	// Send to push services
 	ns.sendToPushServices(payload)
 }
@@ -178,23 +177,23 @@ func (ns *NotificationService) sendToWebhooks(payload *NotificationPayload) {
 	webhooks := make([]WebhookEndpoint, len(ns.webhooks))
 	copy(webhooks, ns.webhooks)
 	ns.mutex.RUnlock()
-	
+
 	for _, webhook := range webhooks {
 		if !webhook.Enabled {
 			continue
 		}
-		
+
 		// Check event filter
 		if !ns.eventMatchesFilter(payload.Event, webhook.EventFilter) {
 			continue
 		}
-		
+
 		// Check rate limit
 		if !ns.checkRateLimit(webhook.Name, 100) { // 100 per hour default
 			log.Printf("Rate limit exceeded for webhook: %s", webhook.Name)
 			continue
 		}
-		
+
 		// Send asynchronously
 		go ns.sendWebhook(webhook, payload)
 	}
@@ -203,68 +202,68 @@ func (ns *NotificationService) sendToWebhooks(payload *NotificationPayload) {
 // sendWebhook sends to a single webhook endpoint
 func (ns *NotificationService) sendWebhook(webhook WebhookEndpoint, payload *NotificationPayload) {
 	startTime := time.Now()
-	
+
 	// Generate request body
 	var requestBody []byte
 	var err error
-	
+
 	if webhook.Template != "" {
 		requestBody, err = ns.applyTemplate(webhook.Template, payload)
 	} else {
 		requestBody, err = json.Marshal(payload)
 	}
-	
+
 	if err != nil {
 		ns.recordWebhookFailure(webhook.Name, err)
 		return
 	}
-	
+
 	// Create request
 	req, err := http.NewRequest(webhook.Method, webhook.URL, bytes.NewBuffer(requestBody))
 	if err != nil {
 		ns.recordWebhookFailure(webhook.Name, err)
 		return
 	}
-	
+
 	// Set headers
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "HomeLink-Notification-Service/1.0")
-	
+
 	for key, value := range webhook.Headers {
 		req.Header.Set(key, value)
 	}
-	
+
 	// Send with retries
 	var resp *http.Response
 	for attempt := 0; attempt <= webhook.Retries; attempt++ {
 		if attempt > 0 {
 			time.Sleep(webhook.RetryDelay * time.Duration(attempt))
 		}
-		
+
 		client := &http.Client{Timeout: webhook.Timeout}
 		resp, err = client.Do(req)
-		
+
 		if err == nil && resp.StatusCode < 500 {
 			break // Success or client error (don't retry)
 		}
-		
+
 		if resp != nil {
 			resp.Body.Close()
 		}
 	}
-	
+
 	duration := time.Since(startTime)
-	
+
 	if err != nil {
 		ns.recordWebhookFailure(webhook.Name, err)
 		log.Printf("Webhook failed after %d retries: %s - %v", webhook.Retries, webhook.Name, err)
 		return
 	}
-	
+
 	// Read response
 	body, _ := io.ReadAll(resp.Body)
 	resp.Body.Close()
-	
+
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		ns.recordWebhookSuccess(webhook.Name)
 		log.Printf("Webhook sent successfully: %s (%d, %s)", webhook.Name, resp.StatusCode, duration)
@@ -280,17 +279,17 @@ func (ns *NotificationService) sendToPushServices(payload *NotificationPayload) 
 	services := make([]PushService, len(ns.pushServices))
 	copy(services, ns.pushServices)
 	ns.mutex.RUnlock()
-	
+
 	for _, service := range services {
 		if !service.Enabled {
 			continue
 		}
-		
+
 		// Check event filter
 		if !ns.eventMatchesFilter(payload.Event, service.EventFilter) {
 			continue
 		}
-		
+
 		// Send asynchronously
 		go ns.sendPushNotification(service, payload)
 	}
@@ -319,22 +318,22 @@ func (ns *NotificationService) sendNtfyNotification(service PushService, payload
 		log.Printf("Missing URL for ntfy service: %s", service.Name)
 		return
 	}
-	
+
 	message := ns.generateMessage(service.Template, payload)
 	if message == "" {
 		message = payload.Summary
 	}
-	
+
 	// Create ntfy request
 	req, err := http.NewRequest("POST", url, strings.NewReader(message))
 	if err != nil {
 		ns.recordPushFailure(service.Name, err)
 		return
 	}
-	
+
 	req.Header.Set("Title", fmt.Sprintf("HomeLink - %s", payload.DeviceName))
 	req.Header.Set("Tags", ns.getEventTags(payload.Event))
-	
+
 	// Set priority
 	switch payload.Priority {
 	case "emergency":
@@ -346,14 +345,14 @@ func (ns *NotificationService) sendNtfyNotification(service PushService, payload
 	default:
 		req.Header.Set("Priority", "default")
 	}
-	
+
 	resp, err := ns.client.Do(req)
 	if err != nil {
 		ns.recordPushFailure(service.Name, err)
 		return
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		ns.recordPushSuccess(service.Name)
 		log.Printf("Ntfy notification sent: %s", service.Name)
@@ -369,12 +368,12 @@ func (ns *NotificationService) sendDiscordNotification(service PushService, payl
 		log.Printf("Missing webhook_url for Discord service: %s", service.Name)
 		return
 	}
-	
+
 	message := ns.generateMessage(service.Template, payload)
 	if message == "" {
 		message = payload.Summary
 	}
-	
+
 	discordPayload := map[string]interface{}{
 		"content": message,
 		"embeds": []map[string]interface{}{
@@ -391,7 +390,7 @@ func (ns *NotificationService) sendDiscordNotification(service PushService, payl
 			},
 		},
 	}
-	
+
 	// Add image if available
 	if len(payload.Attachments) > 0 {
 		for _, attachment := range payload.Attachments {
@@ -405,23 +404,23 @@ func (ns *NotificationService) sendDiscordNotification(service PushService, payl
 			}
 		}
 	}
-	
+
 	jsonData, _ := json.Marshal(discordPayload)
 	req, err := http.NewRequest("POST", webhookURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		ns.recordPushFailure(service.Name, err)
 		return
 	}
-	
+
 	req.Header.Set("Content-Type", "application/json")
-	
+
 	resp, err := ns.client.Do(req)
 	if err != nil {
 		ns.recordPushFailure(service.Name, err)
 		return
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		ns.recordPushSuccess(service.Name)
 		log.Printf("Discord notification sent: %s", service.Name)
@@ -437,20 +436,20 @@ func (ns *NotificationService) sendSlackNotification(service PushService, payloa
 		log.Printf("Missing webhook_url for Slack service: %s", service.Name)
 		return
 	}
-	
+
 	message := ns.generateMessage(service.Template, payload)
 	if message == "" {
 		message = payload.Summary
 	}
-	
+
 	slackPayload := map[string]interface{}{
 		"text": fmt.Sprintf("HomeLink Alert - %s", payload.DeviceName),
 		"attachments": []map[string]interface{}{
 			{
-				"color":      ns.getPriorityColorHex(payload.Priority),
-				"title":      payload.Summary,
-				"text":       message,
-				"timestamp":  payload.Timestamp.Unix(),
+				"color":     ns.getPriorityColorHex(payload.Priority),
+				"title":     payload.Summary,
+				"text":      message,
+				"timestamp": payload.Timestamp.Unix(),
 				"fields": []map[string]interface{}{
 					{"title": "Event Type", "value": string(payload.Event.Type), "short": true},
 					{"title": "Device", "value": payload.Event.DeviceID, "short": true},
@@ -459,23 +458,23 @@ func (ns *NotificationService) sendSlackNotification(service PushService, payloa
 			},
 		},
 	}
-	
+
 	jsonData, _ := json.Marshal(slackPayload)
 	req, err := http.NewRequest("POST", webhookURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		ns.recordPushFailure(service.Name, err)
 		return
 	}
-	
+
 	req.Header.Set("Content-Type", "application/json")
-	
+
 	resp, err := ns.client.Do(req)
 	if err != nil {
 		ns.recordPushFailure(service.Name, err)
 		return
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		ns.recordPushSuccess(service.Name)
 		log.Printf("Slack notification sent: %s", service.Name)
@@ -488,42 +487,42 @@ func (ns *NotificationService) sendSlackNotification(service PushService, payloa
 func (ns *NotificationService) sendTelegramNotification(service PushService, payload *NotificationPayload) {
 	botToken := service.Config["bot_token"]
 	chatID := service.Config["chat_id"]
-	
+
 	if botToken == "" || chatID == "" {
 		log.Printf("Missing bot_token or chat_id for Telegram service: %s", service.Name)
 		return
 	}
-	
+
 	message := ns.generateMessage(service.Template, payload)
 	if message == "" {
-		message = fmt.Sprintf("🏠 *HomeLink Alert*\n\n*Device:* %s\n*Event:* %s\n*Priority:* %s\n\n%s", 
+		message = fmt.Sprintf("🏠 *HomeLink Alert*\n\n*Device:* %s\n*Event:* %s\n*Priority:* %s\n\n%s",
 			payload.DeviceName, string(payload.Event.Type), payload.Priority, payload.Summary)
 	}
-	
+
 	apiURL := fmt.Sprintf("https://api.telegram.org/bot%s/sendMessage", botToken)
-	
+
 	telegramPayload := map[string]interface{}{
 		"chat_id":    chatID,
 		"text":       message,
 		"parse_mode": "Markdown",
 	}
-	
+
 	jsonData, _ := json.Marshal(telegramPayload)
 	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonData))
 	if err != nil {
 		ns.recordPushFailure(service.Name, err)
 		return
 	}
-	
+
 	req.Header.Set("Content-Type", "application/json")
-	
+
 	resp, err := ns.client.Do(req)
 	if err != nil {
 		ns.recordPushFailure(service.Name, err)
 		return
 	}
 	defer resp.Body.Close()
-	
+
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		ns.recordPushSuccess(service.Name)
 		log.Printf("Telegram notification sent: %s", service.Name)
@@ -539,7 +538,7 @@ func (ns *NotificationService) eventMatchesFilter(event *Message, filter []strin
 	if len(filter) == 0 {
 		return true // No filter means all events
 	}
-	
+
 	for _, eventType := range filter {
 		if string(event.Type) == eventType {
 			return true
@@ -552,10 +551,10 @@ func (ns *NotificationService) eventMatchesFilter(event *Message, filter []strin
 func (ns *NotificationService) checkRateLimit(endpoint string, maxPerHour int) bool {
 	ns.mutex.Lock()
 	defer ns.mutex.Unlock()
-	
+
 	now := time.Now()
 	limit, exists := ns.rateLimiter[endpoint]
-	
+
 	if !exists {
 		ns.rateLimiter[endpoint] = &NotificationRateLimit{
 			Count:       1,
@@ -564,20 +563,20 @@ func (ns *NotificationService) checkRateLimit(endpoint string, maxPerHour int) b
 		}
 		return true
 	}
-	
+
 	// Reset window if it's been an hour
 	if now.Sub(limit.WindowStart) >= time.Hour {
 		limit.Count = 1
 		limit.WindowStart = now
 		return true
 	}
-	
+
 	// Check if within limit
 	if limit.Count < limit.MaxPerHour {
 		limit.Count++
 		return true
 	}
-	
+
 	return false
 }
 
@@ -587,49 +586,49 @@ func (ns *NotificationService) generateSummary(event *Message) string {
 		if desc, exists := dataMap["description"].(string); exists && desc != "" {
 			return desc
 		}
-		
+
 		// Try to build summary from available data
 		if eventType, exists := dataMap["event_type"].(string); exists {
 			summary := fmt.Sprintf("%s event", strings.Title(eventType))
-			
+
 			if camera, exists := dataMap["camera"].(string); exists {
 				summary += fmt.Sprintf(" on %s", camera)
 			}
-			
+
 			if confidence, exists := dataMap["confidence"].(string); exists {
 				summary += fmt.Sprintf(" (confidence: %s)", confidence)
 			}
-			
+
 			return summary
 		}
 	}
-	
+
 	return fmt.Sprintf("%s event from %s", string(event.Type), event.DeviceID)
 }
 
 // extractDetails extracts detailed information from event
 func (ns *NotificationService) extractDetails(event *Message) map[string]interface{} {
 	details := make(map[string]interface{})
-	
+
 	if dataMap, ok := event.Data.(map[string]interface{}); ok {
 		for k, v := range dataMap {
 			details[k] = v
 		}
 	}
-	
+
 	details["timestamp"] = time.Unix(event.Timestamp, 0).Format(time.RFC3339)
 	details["device_id"] = event.DeviceID
 	details["event_type"] = string(event.Type)
-	
+
 	return details
 }
 
 // extractAttachments extracts attachments from event data
 func (ns *NotificationService) extractAttachments(event *Message) []NotificationAttachment {
 	var attachments []NotificationAttachment
-	
+
 	if dataMap, ok := event.Data.(map[string]interface{}); ok {
-		// Check for Frigate snapshot
+		// Check for security camera snapshot
 		if snapshotURL, exists := dataMap["snapshot_url"].(string); exists && snapshotURL != "" {
 			attachments = append(attachments, NotificationAttachment{
 				Type:     "image",
@@ -637,7 +636,7 @@ func (ns *NotificationService) extractAttachments(event *Message) []Notification
 				MimeType: "image/jpeg",
 			})
 		}
-		
+
 		// Check for embedded image data
 		if snapshotData, exists := dataMap["snapshot_data"].(string); exists && snapshotData != "" {
 			// Would decode base64 data here
@@ -648,7 +647,7 @@ func (ns *NotificationService) extractAttachments(event *Message) []Notification
 			})
 		}
 	}
-	
+
 	return attachments
 }
 
@@ -656,7 +655,7 @@ func (ns *NotificationService) extractAttachments(event *Message) []Notification
 func (ns *NotificationService) applyTemplate(template string, payload *NotificationPayload) ([]byte, error) {
 	// Simple template substitution - in a real implementation you'd use text/template
 	result := template
-	
+
 	replacements := map[string]string{
 		"{{.DeviceName}}": payload.DeviceName,
 		"{{.Summary}}":    payload.Summary,
@@ -665,11 +664,11 @@ func (ns *NotificationService) applyTemplate(template string, payload *Notificat
 		"{{.DeviceID}}":   payload.Event.DeviceID,
 		"{{.Timestamp}}":  payload.Timestamp.Format(time.RFC3339),
 	}
-	
+
 	for placeholder, value := range replacements {
 		result = strings.ReplaceAll(result, placeholder, value)
 	}
-	
+
 	return []byte(result), nil
 }
 
@@ -678,7 +677,7 @@ func (ns *NotificationService) generateMessage(template string, payload *Notific
 	if template == "" {
 		return payload.Summary
 	}
-	
+
 	result := template
 	replacements := map[string]string{
 		"{{.DeviceName}}": payload.DeviceName,
@@ -688,20 +687,20 @@ func (ns *NotificationService) generateMessage(template string, payload *Notific
 		"{{.DeviceID}}":   payload.Event.DeviceID,
 		"{{.Timestamp}}":  payload.Timestamp.Format("2006-01-02 15:04:05"),
 	}
-	
+
 	for placeholder, value := range replacements {
 		result = strings.ReplaceAll(result, placeholder, value)
 	}
-	
+
 	return result
 }
 
 // getEventTags returns emoji tags for event types
 func (ns *NotificationService) getEventTags(event *Message) string {
 	eventType := string(event.Type)
-	
+
 	tags := []string{"homelink"}
-	
+
 	if strings.Contains(eventType, "person") {
 		tags = append(tags, "person")
 	}
@@ -714,7 +713,7 @@ func (ns *NotificationService) getEventTags(event *Message) string {
 	if strings.Contains(eventType, "door") {
 		tags = append(tags, "door")
 	}
-	
+
 	return strings.Join(tags, ",")
 }
 
@@ -726,9 +725,9 @@ func (ns *NotificationService) getPriorityColor(priority string) int {
 	case "high":
 		return 15844367 // Orange
 	case "low":
-		return 5763719  // Gray
+		return 5763719 // Gray
 	default:
-		return 3447003  // Blue
+		return 3447003 // Blue
 	}
 }
 
@@ -779,13 +778,13 @@ func (ns *NotificationService) recordPushFailure(name string, err error) {
 func (ns *NotificationService) GetStats() NotificationStats {
 	ns.mutex.RLock()
 	defer ns.mutex.RUnlock()
-	
+
 	// Create a copy
 	stats := ns.stats
 	stats.ByEndpoint = make(map[string]uint64)
 	for k, v := range ns.stats.ByEndpoint {
 		stats.ByEndpoint[k] = v
 	}
-	
+
 	return stats
 }

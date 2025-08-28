@@ -18,76 +18,76 @@ import (
 
 // StorageConfig configures the event storage system
 type StorageConfig struct {
-	Enabled        bool   `json:"enabled"`
-	DatabasePath   string `json:"database_path"`   // Path to SQLite database file
-	RetentionDays  int    `json:"retention_days"`  // Days to keep events (0 = forever)
-	MaxEvents      int    `json:"max_events"`      // Maximum events to store (0 = unlimited)
-	BatchSize      int    `json:"batch_size"`      // Events to batch insert
-	FlushInterval  time.Duration `json:"flush_interval"`  // How often to flush batched events
-	BackupEnabled  bool   `json:"backup_enabled"`
-	BackupPath     string `json:"backup_path"`
+	Enabled        bool          `json:"enabled"`
+	DatabasePath   string        `json:"database_path"`  // Path to SQLite database file
+	RetentionDays  int           `json:"retention_days"` // Days to keep events (0 = forever)
+	MaxEvents      int           `json:"max_events"`     // Maximum events to store (0 = unlimited)
+	BatchSize      int           `json:"batch_size"`     // Events to batch insert
+	FlushInterval  time.Duration `json:"flush_interval"` // How often to flush batched events
+	BackupEnabled  bool          `json:"backup_enabled"`
+	BackupPath     string        `json:"backup_path"`
 	BackupInterval time.Duration `json:"backup_interval"`
 }
 
 // EventStorage manages persistent event storage
 type EventStorage struct {
-	config    StorageConfig
-	db        *sql.DB
-	mutex     sync.RWMutex
+	config     StorageConfig
+	db         *sql.DB
+	mutex      sync.RWMutex
 	eventBatch []StoredEvent
-	stats     StorageStats
-	stopChan  chan bool
+	stats      StorageStats
+	stopChan   chan bool
 }
 
 // StoredEvent represents an event in the database
 type StoredEvent struct {
-	ID           int64                  `json:"id"`
-	DeviceID     string                 `json:"device_id"`
-	EventType    string                 `json:"event_type"`
-	Timestamp    int64                  `json:"timestamp"`
-	Data         map[string]interface{} `json:"data"`
-	Priority     string                 `json:"priority"`
-	ProcessedBy  string                 `json:"processed_by"`  // Which filters/rules processed it
-	Tags         []string               `json:"tags"`
-	CreatedAt    time.Time              `json:"created_at"`
-	ExpiresAt    *time.Time             `json:"expires_at"`
+	ID          int64                  `json:"id"`
+	DeviceID    string                 `json:"device_id"`
+	EventType   string                 `json:"event_type"`
+	Timestamp   int64                  `json:"timestamp"`
+	Data        map[string]interface{} `json:"data"`
+	Priority    string                 `json:"priority"`
+	ProcessedBy string                 `json:"processed_by"` // Which filters/rules processed it
+	Tags        []string               `json:"tags"`
+	CreatedAt   time.Time              `json:"created_at"`
+	ExpiresAt   *time.Time             `json:"expires_at"`
 }
 
 // StorageStats tracks storage system performance
 type StorageStats struct {
-	EventsStored        uint64    `json:"events_stored"`
-	EventsDeleted       uint64    `json:"events_deleted"`
-	DatabaseSize        int64     `json:"database_size_bytes"`
-	LastCleanup         time.Time `json:"last_cleanup"`
-	LastBackup          time.Time `json:"last_backup"`
-	BatchesProcessed    uint64    `json:"batches_processed"`
-	StorageErrors       uint64    `json:"storage_errors"`
-	AverageInsertTime   int64     `json:"average_insert_time_ms"`
-	OldestEvent         time.Time `json:"oldest_event"`
-	NewestEvent         time.Time `json:"newest_event"`
+	EventsStored      uint64    `json:"events_stored"`
+	EventsDeleted     uint64    `json:"events_deleted"`
+	DatabaseSize      int64     `json:"database_size_bytes"`
+	LastCleanup       time.Time `json:"last_cleanup"`
+	LastBackup        time.Time `json:"last_backup"`
+	BatchesProcessed  uint64    `json:"batches_processed"`
+	StorageErrors     uint64    `json:"storage_errors"`
+	AverageInsertTime int64     `json:"average_insert_time_ms"`
+	OldestEvent       time.Time `json:"oldest_event"`
+	NewestEvent       time.Time `json:"newest_event"`
 }
 
 // EventQuery represents a query for stored events
 type EventQuery struct {
-	DeviceIDs    []string  `json:"device_ids"`
-	EventTypes   []string  `json:"event_types"`
-	StartTime    *time.Time `json:"start_time"`
-	EndTime      *time.Time `json:"end_time"`
-	Tags         []string  `json:"tags"`
-	Limit        int       `json:"limit"`
-	Offset       int       `json:"offset"`
-	OrderBy      string    `json:"order_by"`    // "timestamp", "device_id", "event_type"
-	OrderDesc    bool      `json:"order_desc"`
+	DeviceIDs  []string   `json:"device_ids"`
+	EventTypes []string   `json:"event_types"`
+	StartTime  *time.Time `json:"start_time"`
+	EndTime    *time.Time `json:"end_time"`
+	Tags       []string   `json:"tags"`
+	Limit      int        `json:"limit"`
+	Offset     int        `json:"offset"`
+	OrderBy    string     `json:"order_by"` // "timestamp", "device_id", "event_type"
+	OrderDesc  bool       `json:"order_desc"`
 }
 
 // EventAggregate represents aggregated event statistics
 type EventAggregate struct {
-	DeviceID      string    `json:"device_id"`
-	EventType     string    `json:"event_type"`
-	Count         int64     `json:"count"`
-	FirstSeen     time.Time `json:"first_seen"`
-	LastSeen      time.Time `json:"last_seen"`
-	AverageValue  *float64  `json:"average_value"`  // For numeric data fields
+	DeviceID     string    `json:"device_id"`
+	EventType    string    `json:"event_type"`
+	Count        int64     `json:"count"`
+	FirstSeen    time.Time `json:"first_seen"`
+	LastSeen     time.Time `json:"last_seen"`
+	AverageValue *float64  `json:"average_value"` // For numeric data fields
 }
 
 // NewEventStorage creates a new event storage system
@@ -107,7 +107,7 @@ func NewEventStorage(config StorageConfig) (*EventStorage, error) {
 		// Start background processes
 		go storage.batchProcessor()
 		go storage.cleanupRoutine()
-		
+
 		if config.BackupEnabled {
 			go storage.backupRoutine()
 		}
@@ -218,12 +218,12 @@ func (es *EventStorage) StoreEvent(msg *Message) error {
 	}
 
 	storedEvent := StoredEvent{
-		DeviceID:    msg.DeviceID,
-		EventType:   string(msg.Type),
-		Timestamp:   msg.Timestamp,
-		Data:        msg.Data.(map[string]interface{}),
-		Priority:    "normal", // Default priority
-		CreatedAt:   time.Now(),
+		DeviceID:  msg.DeviceID,
+		EventType: string(msg.Type),
+		Timestamp: msg.Timestamp,
+		Data:      msg.Data.(map[string]interface{}),
+		Priority:  "normal", // Default priority
+		CreatedAt: time.Now(),
 	}
 
 	// Set expiry time if retention is configured
@@ -248,7 +248,7 @@ func (es *EventStorage) addToBatch(event StoredEvent) {
 	defer es.mutex.Unlock()
 
 	es.eventBatch = append(es.eventBatch, event)
-	
+
 	// Flush batch if it's full
 	if len(es.eventBatch) >= es.config.BatchSize {
 		go es.flushBatch()
@@ -258,7 +258,7 @@ func (es *EventStorage) addToBatch(event StoredEvent) {
 // storeEventImmediate stores a single event immediately
 func (es *EventStorage) storeEventImmediate(event StoredEvent, dataJSON string) error {
 	start := time.Now()
-	
+
 	tx, err := es.db.Begin()
 	if err != nil {
 		es.incrementStorageErrors()
@@ -278,7 +278,7 @@ func (es *EventStorage) storeEventImmediate(event StoredEvent, dataJSON string) 
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		event.DeviceID, event.EventType, event.Timestamp, dataJSON, event.Priority,
 		event.ProcessedBy, tagsJSON, event.CreatedAt, event.ExpiresAt)
-	
+
 	if err != nil {
 		es.incrementStorageErrors()
 		return fmt.Errorf("failed to insert event: %v", err)
@@ -295,7 +295,7 @@ func (es *EventStorage) storeEventImmediate(event StoredEvent, dataJSON string) 
 			?
 		)`,
 		event.DeviceID, event.DeviceID, event.CreatedAt, event.CreatedAt, event.DeviceID, event.EventType)
-	
+
 	if err != nil {
 		es.incrementStorageErrors()
 		return fmt.Errorf("failed to update device stats: %v", err)
@@ -323,14 +323,14 @@ func (es *EventStorage) flushBatch() {
 		es.mutex.Unlock()
 		return
 	}
-	
+
 	batch := make([]StoredEvent, len(es.eventBatch))
 	copy(batch, es.eventBatch)
 	es.eventBatch = es.eventBatch[:0] // Clear batch
 	es.mutex.Unlock()
 
 	start := time.Now()
-	
+
 	tx, err := es.db.Begin()
 	if err != nil {
 		es.incrementStorageErrors()
@@ -437,7 +437,6 @@ func (es *EventStorage) QueryEvents(query EventQuery) ([]StoredEvent, error) {
 	// Build SQL query
 	sqlQuery := "SELECT id, device_id, event_type, timestamp, data, priority, processed_by, tags, created_at, expires_at FROM events WHERE 1=1"
 	args := []interface{}{}
-	argIndex := 1
 
 	if len(query.DeviceIDs) > 0 {
 		placeholders := make([]string, len(query.DeviceIDs))
@@ -472,19 +471,19 @@ func (es *EventStorage) QueryEvents(query EventQuery) ([]StoredEvent, error) {
 	if query.OrderBy != "" {
 		orderBy = query.OrderBy
 	}
-	
+
 	direction := "ASC"
 	if query.OrderDesc {
 		direction = "DESC"
 	}
-	
+
 	sqlQuery += fmt.Sprintf(" ORDER BY %s %s", orderBy, direction)
 
 	// Limit and offset
 	if query.Limit > 0 {
 		sqlQuery += " LIMIT ?"
 		args = append(args, query.Limit)
-		
+
 		if query.Offset > 0 {
 			sqlQuery += " OFFSET ?"
 			args = append(args, query.Offset)
@@ -684,7 +683,7 @@ func (es *EventStorage) GetStats() StorageStats {
 	// Get oldest and newest events
 	var oldestTS, newestTS sql.NullInt64
 	es.db.QueryRow("SELECT MIN(timestamp), MAX(timestamp) FROM events").Scan(&oldestTS, &newestTS)
-	
+
 	if oldestTS.Valid {
 		stats.OldestEvent = time.Unix(oldestTS.Int64, 0)
 	}
@@ -709,7 +708,7 @@ func (es *EventStorage) Stop() {
 	}
 
 	close(es.stopChan)
-	
+
 	// Final flush
 	es.flushBatch()
 

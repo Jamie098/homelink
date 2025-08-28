@@ -22,8 +22,8 @@ Example usage - This would typically be in a separate main.go file:
 func main() {
 	// Create a HomeLink service instance
 	service := NewHomeLinkService(
-		"frigate-01",
-		"Frigate Security System",
+		"security-01",
+		"Security System",
 		[]string{"motion_detection", "person_detection", "vehicle_detection"},
 	)
 
