@@ -42,6 +42,13 @@ type HomeLinkService struct {
 	binaryDecoder      *BinaryDecoder
 	protocolMode       ProtocolMode
 
+	// Advanced integration features
+	filteringSystem     *FilteringSystem
+	notificationService *NotificationService
+	mqttBridge         *MQTTBridge
+	frigateIntegration *FrigateIntegration
+	eventStorage       *EventStorage
+
 	// Channels for internal communication
 	eventChan chan Event
 	stopChan  chan bool
@@ -123,6 +130,57 @@ func NewSecureHomeLinkService(deviceID, deviceName string, capabilities []string
 	return service, nil
 }
 
+// NewAdvancedHomeLinkService creates a service with all advanced features
+func NewAdvancedHomeLinkService(deviceID, deviceName string, capabilities []string, 
+	securityConfig *SecurityConfig, mqttConfig *MQTTConfig, notificationConfig *NotificationConfig,
+	storageConfig *StorageConfig) (*HomeLinkService, error) {
+	
+	// Start with secure service if security enabled
+	var service *HomeLinkService
+	var err error
+	
+	if securityConfig != nil && securityConfig.Enabled {
+		service, err = NewSecureHomeLinkService(deviceID, deviceName, capabilities, securityConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create secure service: %v", err)
+		}
+	} else {
+		service = NewHomeLinkService(deviceID, deviceName, capabilities)
+	}
+
+	// Initialize advanced filtering system
+	service.filteringSystem = NewFilteringSystem(5*time.Minute, 10000) // 5 min dedup window, 10k max entries
+	log.Printf("Event filtering and deduplication system initialized")
+
+	// Initialize notification service if configured
+	if notificationConfig != nil && notificationConfig.Enabled {
+		service.notificationService = NewNotificationService(*notificationConfig)
+		log.Printf("Notification service initialized with %d webhooks and %d push services", 
+			len(notificationConfig.Webhooks), len(notificationConfig.PushServices))
+	}
+
+	// Initialize MQTT bridge if configured
+	if mqttConfig != nil && mqttConfig.Enabled {
+		service.mqttBridge = NewMQTTBridge(*mqttConfig, service)
+		log.Printf("MQTT bridge initialized for Home Assistant integration")
+	}
+
+	// Initialize Frigate integration
+	service.frigateIntegration = NewFrigateIntegration()
+	log.Printf("Frigate security system integration initialized")
+
+	// Initialize event storage if configured
+	if storageConfig != nil && storageConfig.Enabled {
+		service.eventStorage, err = NewEventStorage(*storageConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize storage: %v", err)
+		}
+		log.Printf("Event persistence and storage initialized: %s", storageConfig.DatabasePath)
+	}
+
+	return service, nil
+}
+
 // Start initializes and starts the HomeLink service
 func (s *HomeLinkService) Start() error {
 	log.Printf("Starting HomeLink Service for %s (%s)", s.deviceName, s.deviceID)
@@ -168,6 +226,21 @@ func (s *HomeLinkService) Stop() {
 	// Stop reliability manager
 	if s.reliabilityManager != nil {
 		s.reliabilityManager.Stop()
+	}
+
+	// Stop MQTT bridge
+	if s.mqttBridge != nil {
+		s.mqttBridge.Disconnect()
+	}
+
+	// Stop notification service
+	if s.notificationService != nil {
+		s.notificationService.Stop()
+	}
+
+	// Stop event storage
+	if s.eventStorage != nil {
+		s.eventStorage.Stop()
 	}
 }
 
@@ -421,4 +494,262 @@ func (s *HomeLinkService) GetHealthSummary() map[string]interface{} {
 	return map[string]interface{}{
 		"status": "health monitoring disabled",
 	}
+}
+
+// Advanced Features - Event Processing Pipeline
+
+// PublishEvent publishes an event through the complete processing pipeline
+func (s *HomeLinkService) PublishEvent(eventType MessageType, data interface{}) error {
+	return s.PublishEventWithPriority(eventType, data, PriorityNormal)
+}
+
+// PublishEventWithPriority publishes an event with specified priority
+func (s *HomeLinkService) PublishEventWithPriority(eventType MessageType, data interface{}, priority MessagePriority) error {
+	// Create message
+	msg := &Message{
+		Type:      eventType,
+		DeviceID:  s.deviceID,
+		Timestamp: time.Now().Unix(),
+		Data:      data,
+	}
+
+	// Process through filtering system
+	if s.filteringSystem != nil {
+		filterResult := s.filteringSystem.ProcessEvent(msg)
+		
+		switch filterResult.Action {
+		case "deny":
+			log.Printf("Event filtered out: %s (reason: %s)", eventType, filterResult.Reason)
+			return nil
+		case "modify":
+			// Apply modifications to message
+			if filterResult.Modified && len(filterResult.NewData) > 0 {
+				// Merge modifications into message data
+				if dataMap, ok := msg.Data.(map[string]interface{}); ok {
+					for k, v := range filterResult.NewData {
+						dataMap[k] = v
+					}
+				}
+			}
+		}
+	}
+
+	// Send through MQTT bridge
+	if s.mqttBridge != nil {
+		s.mqttBridge.PublishEvent(msg)
+	}
+
+	// Send notifications
+	if s.notificationService != nil {
+		if err := s.notificationService.SendEventNotification(msg); err != nil {
+			log.Printf("Failed to send notification: %v", err)
+		}
+	}
+
+	// Process Frigate events if applicable
+	if s.frigateIntegration != nil && eventType == MSG_FRIGATE_EVENT {
+		if err := s.frigateIntegration.ProcessEvent(msg); err != nil {
+			log.Printf("Frigate processing failed: %v", err)
+		}
+	}
+
+	// Store event in database
+	if s.eventStorage != nil {
+		if err := s.eventStorage.StoreEvent(msg); err != nil {
+			log.Printf("Failed to store event: %v", err)
+		}
+	}
+
+	// Send to network using reliability manager for important events
+	if priority >= PriorityHigh {
+		return s.SendReliableMessage(eventType, data, priority)
+	}
+	
+	// Normal network broadcast
+	return s.SendMessage(eventType, data)
+}
+
+// ProcessIncomingEvent processes events received from other devices
+func (s *HomeLinkService) ProcessIncomingEvent(msg *Message, addr *net.UDPAddr) {
+	// Apply filtering system to incoming events too
+	if s.filteringSystem != nil {
+		filterResult := s.filteringSystem.ProcessEvent(msg)
+		if filterResult.Action == "deny" {
+			return // Filtered out
+		}
+	}
+
+	// Update device information
+	s.updateDeviceFromMessage(msg, addr)
+
+	// Forward to MQTT bridge
+	if s.mqttBridge != nil {
+		s.mqttBridge.PublishEvent(msg)
+	}
+
+	// Send notifications for external events if configured
+	if s.notificationService != nil {
+		// Only send notifications for certain external events to avoid spam
+		if msg.Type == MSG_FRIGATE_EVENT || msg.Type == MSG_ALERT || msg.Type == MSG_SENSOR_DATA {
+			if err := s.notificationService.SendEventNotification(msg); err != nil {
+				log.Printf("Failed to send external event notification: %v", err)
+			}
+		}
+	}
+
+	// Process through Frigate integration
+	if s.frigateIntegration != nil && msg.Type == MSG_FRIGATE_EVENT {
+		if err := s.frigateIntegration.ProcessEvent(msg); err != nil {
+			log.Printf("Frigate processing failed for external event: %v", err)
+		}
+	}
+
+	// Store incoming event if enabled (optional - may want to filter external events)
+	if s.eventStorage != nil {
+		if err := s.eventStorage.StoreEvent(msg); err != nil {
+			log.Printf("Failed to store incoming event: %v", err)
+		}
+	}
+}
+
+// updateDeviceFromMessage updates device info from received message
+func (s *HomeLinkService) updateDeviceFromMessage(msg *Message, addr *net.UDPAddr) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	if device, exists := s.devices[msg.DeviceID]; exists {
+		device.LastSeen = time.Now()
+		if addr != nil {
+			device.IPAddress = addr.IP.String()
+			device.Port = addr.Port
+		}
+	} else {
+		// Create new device entry
+		device := &Device{
+			ID:        msg.DeviceID,
+			Name:      msg.DeviceID, // Will be updated when we get device info
+			LastSeen:  time.Now(),
+			Status:    DeviceStatusOnline,
+		}
+		if addr != nil {
+			device.IPAddress = addr.IP.String()
+			device.Port = addr.Port
+		}
+		s.devices[msg.DeviceID] = device
+
+		// Notify MQTT bridge of new device
+		if s.mqttBridge != nil {
+			s.mqttBridge.PublishDeviceUpdate(device)
+		}
+	}
+}
+
+// Advanced Integration Management Methods
+
+// AddEventFilter adds a new event filter to the filtering system
+func (s *HomeLinkService) AddEventFilter(filter EventFilter) error {
+	if s.filteringSystem == nil {
+		return fmt.Errorf("filtering system not initialized")
+	}
+	return s.filteringSystem.AddFilter(filter)
+}
+
+// RemoveEventFilter removes an event filter by name
+func (s *HomeLinkService) RemoveEventFilter(name string) bool {
+	if s.filteringSystem == nil {
+		return false
+	}
+	return s.filteringSystem.RemoveFilter(name)
+}
+
+// GetFilteringStats returns event filtering statistics
+func (s *HomeLinkService) GetFilteringStats() FilteringStats {
+	if s.filteringSystem == nil {
+		return FilteringStats{}
+	}
+	return s.filteringSystem.GetStats()
+}
+
+// GetMQTTStats returns MQTT bridge statistics
+func (s *HomeLinkService) GetMQTTStats() MQTTStats {
+	if s.mqttBridge == nil {
+		return MQTTStats{}
+	}
+	return s.mqttBridge.GetStats()
+}
+
+// GetNotificationStats returns notification service statistics
+func (s *HomeLinkService) GetNotificationStats() NotificationStats {
+	if s.notificationService == nil {
+		return NotificationStats{}
+	}
+	return s.notificationService.GetStats()
+}
+
+// IsMQTTConnected returns MQTT connection status
+func (s *HomeLinkService) IsMQTTConnected() bool {
+	if s.mqttBridge == nil {
+		return false
+	}
+	return s.mqttBridge.IsConnected()
+}
+
+// ConfigureFrigateCamera adds or updates a Frigate camera configuration
+func (s *HomeLinkService) ConfigureFrigateCamera(config CameraConfig) error {
+	if s.frigateIntegration == nil {
+		return fmt.Errorf("Frigate integration not initialized")
+	}
+	return s.frigateIntegration.AddCamera(config)
+}
+
+// AddFrigateAutomation adds a new Frigate automation rule
+func (s *HomeLinkService) AddFrigateAutomation(rule AutomationRule) error {
+	if s.frigateIntegration == nil {
+		return fmt.Errorf("Frigate integration not initialized")
+	}
+	return s.frigateIntegration.AddAutomationRule(rule)
+}
+
+// GetDeviceID returns the device ID
+func (s *HomeLinkService) GetDeviceID() string {
+	return s.deviceID
+}
+
+// SendTestNotification sends a test notification through the notification service
+func (s *HomeLinkService) SendTestNotification(msg *Message) error {
+	if s.notificationService == nil {
+		return fmt.Errorf("notification service not initialized")
+	}
+	return s.notificationService.SendEventNotification(msg)
+}
+
+// Storage-related methods
+
+// QueryStoredEvents retrieves events from storage based on query criteria
+func (s *HomeLinkService) QueryStoredEvents(query EventQuery) ([]StoredEvent, error) {
+	if s.eventStorage == nil {
+		return []StoredEvent{}, fmt.Errorf("event storage not initialized")
+	}
+	return s.eventStorage.QueryEvents(query)
+}
+
+// GetEventAggregates returns aggregated event statistics from storage
+func (s *HomeLinkService) GetEventAggregates(startTime, endTime time.Time) ([]EventAggregate, error) {
+	if s.eventStorage == nil {
+		return []EventAggregate{}, fmt.Errorf("event storage not initialized")
+	}
+	return s.eventStorage.GetEventAggregates(startTime, endTime)
+}
+
+// GetStorageStats returns storage system statistics
+func (s *HomeLinkService) GetStorageStats() StorageStats {
+	if s.eventStorage == nil {
+		return StorageStats{}
+	}
+	return s.eventStorage.GetStats()
+}
+
+// IsStorageEnabled returns whether event storage is enabled
+func (s *HomeLinkService) IsStorageEnabled() bool {
+	return s.eventStorage != nil && s.eventStorage.IsEnabled()
 }

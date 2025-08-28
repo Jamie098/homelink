@@ -54,6 +54,37 @@ func main() {
 	burstSize, _ := strconv.Atoi(getEnv("HOMELINK_BURST_SIZE", "20"))
 	autoAcceptPairing := getEnv("HOMELINK_AUTO_ACCEPT_PAIRING", "false") == "true"
 
+	// MQTT configuration
+	mqttEnabled := getEnv("HOMELINK_MQTT_ENABLED", "false") == "true"
+	mqttBroker := getEnv("HOMELINK_MQTT_BROKER", "mqtt://localhost:1883")
+	mqttUsername := getEnv("HOMELINK_MQTT_USERNAME", "")
+	mqttPassword := getEnv("HOMELINK_MQTT_PASSWORD", "")
+	mqttClientID := getEnv("HOMELINK_MQTT_CLIENT_ID", deviceID+"_mqtt")
+	mqttTopicPrefix := getEnv("HOMELINK_MQTT_TOPIC_PREFIX", "homelink")
+	haDiscoveryEnabled := getEnv("HOMELINK_HA_DISCOVERY", "true") == "true"
+	haDiscoveryPrefix := getEnv("HOMELINK_HA_DISCOVERY_PREFIX", "homeassistant")
+
+	// Notification configuration  
+	notificationEnabled := getEnv("HOMELINK_NOTIFICATIONS_ENABLED", "false") == "true"
+	webhookURL := getEnv("HOMELINK_WEBHOOK_URL", "")
+	discordWebhook := getEnv("HOMELINK_DISCORD_WEBHOOK", "")
+	slackWebhook := getEnv("HOMELINK_SLACK_WEBHOOK", "")
+	telegramToken := getEnv("HOMELINK_TELEGRAM_TOKEN", "")
+	telegramChatID := getEnv("HOMELINK_TELEGRAM_CHAT_ID", "")
+
+	// Storage configuration
+	storageEnabled := getEnv("HOMELINK_STORAGE_ENABLED", "false") == "true"
+	databasePath := getEnv("HOMELINK_DATABASE_PATH", "./homelink_events.db")
+	retentionDays, _ := strconv.Atoi(getEnv("HOMELINK_RETENTION_DAYS", "30"))
+	maxEvents, _ := strconv.Atoi(getEnv("HOMELINK_MAX_EVENTS", "0"))
+	batchSize, _ := strconv.Atoi(getEnv("HOMELINK_BATCH_SIZE", "100"))
+	flushIntervalStr := getEnv("HOMELINK_FLUSH_INTERVAL", "10s")
+	flushInterval, _ := time.ParseDuration(flushIntervalStr)
+	backupEnabled := getEnv("HOMELINK_BACKUP_ENABLED", "false") == "true"
+	backupPath := getEnv("HOMELINK_BACKUP_PATH", "./backups")
+	backupIntervalStr := getEnv("HOMELINK_BACKUP_INTERVAL", "24h")
+	backupInterval, _ := time.ParseDuration(backupIntervalStr)
+
 	// Parse capabilities
 	capabilities := strings.Split(capabilitiesStr, ",")
 	for i, cap := range capabilities {
@@ -70,9 +101,10 @@ func main() {
 	var service *homelink.HomeLinkService
 	var err error
 
-	// Create service with or without security
+	// Prepare security configuration
+	var securityConfig *homelink.SecurityConfig
 	if securityEnabled {
-		config := &homelink.SecurityConfig{
+		securityConfig = &homelink.SecurityConfig{
 			Enabled:                securityEnabled,
 			RequireAuthentication:  requireAuth,
 			AllowedNetworkKey:      networkKey,
@@ -82,10 +114,135 @@ func main() {
 			AutoAcceptPairing:      autoAcceptPairing,
 			RequireDeviceApproval:  !autoAcceptPairing,
 		}
-		service, err = homelink.NewSecureHomeLinkService(deviceID, deviceName, capabilities, config)
-	} else {
-		service = homelink.NewHomeLinkService(deviceID, deviceName, capabilities)
 	}
+
+	// Prepare MQTT configuration
+	var mqttConfig *homelink.MQTTConfig
+	if mqttEnabled {
+		mqttConfig = &homelink.MQTTConfig{
+			Enabled:     true,
+			BrokerURL:   mqttBroker,
+			Username:    mqttUsername,
+			Password:    mqttPassword,
+			ClientID:    mqttClientID,
+			QoS:         1,
+			Retained:    true,
+			TopicPrefix: mqttTopicPrefix,
+			HADiscovery: homelink.HADiscoveryConfig{
+				Enabled:            haDiscoveryEnabled,
+				DiscoveryPrefix:    haDiscoveryPrefix,
+				NodeID:             deviceID,
+				DeviceName:         deviceName,
+				DeviceModel:        "HomeLink Protocol v1.0",
+				DeviceManufacturer: "HomeLink Project",
+				AutoExpiry:         300, // 5 minutes
+			},
+		}
+	}
+
+	// Prepare notification configuration
+	var notificationConfig *homelink.NotificationConfig
+	if notificationEnabled {
+		notificationConfig = &homelink.NotificationConfig{
+			Enabled:   true,
+			Webhooks:  []homelink.WebhookEndpoint{},
+			PushServices: []homelink.PushService{},
+		}
+
+		// Add webhooks if configured
+		if webhookURL != "" {
+			notificationConfig.Webhooks = append(notificationConfig.Webhooks, homelink.WebhookEndpoint{
+				Name:    "default_webhook",
+				URL:     webhookURL,
+				Enabled: true,
+				Headers: map[string]string{"Content-Type": "application/json"},
+			})
+		}
+
+		// Add Discord webhook if configured
+		if discordWebhook != "" {
+			notificationConfig.Webhooks = append(notificationConfig.Webhooks, homelink.WebhookEndpoint{
+				Name:    "discord",
+				URL:     discordWebhook,
+				Enabled: true,
+				Headers: map[string]string{"Content-Type": "application/json"},
+				Template: `{
+					"embeds": [{
+						"title": "HomeLink Event",
+						"description": "{{.Type}} from {{.DeviceID}}",
+						"color": 3447003,
+						"fields": [
+							{"name": "Device", "value": "{{.DeviceID}}", "inline": true},
+							{"name": "Type", "value": "{{.Type}}", "inline": true},
+							{"name": "Timestamp", "value": "{{.Timestamp}}", "inline": true}
+						]
+					}]
+				}`,
+			})
+		}
+
+		// Add Slack webhook if configured
+		if slackWebhook != "" {
+			notificationConfig.Webhooks = append(notificationConfig.Webhooks, homelink.WebhookEndpoint{
+				Name:    "slack",
+				URL:     slackWebhook,
+				Enabled: true,
+				Headers: map[string]string{"Content-Type": "application/json"},
+				Template: `{
+					"text": "HomeLink Event: {{.Type}} from {{.DeviceID}}",
+					"attachments": [{
+						"color": "good",
+						"fields": [
+							{"title": "Device", "value": "{{.DeviceID}}", "short": true},
+							{"title": "Type", "value": "{{.Type}}", "short": true},
+							{"title": "Time", "value": "{{.Timestamp}}", "short": true}
+						]
+					}]
+				}`,
+			})
+		}
+
+		// Add Telegram if configured
+		if telegramToken != "" && telegramChatID != "" {
+			notificationConfig.PushServices = append(notificationConfig.PushServices, homelink.PushService{
+				Name:     "telegram",
+				Type:     "telegram",
+				Enabled:  true,
+				Token:    telegramToken,
+				Endpoint: "https://api.telegram.org/bot" + telegramToken + "/sendMessage",
+				Config: map[string]interface{}{
+					"chat_id": telegramChatID,
+				},
+				Template: "🏠 *HomeLink Event*\n\n📱 Device: {{.DeviceID}}\n🔔 Type: {{.Type}}\n⏰ Time: {{.Timestamp}}",
+			})
+		}
+	}
+
+	// Prepare storage configuration
+	var storageConfig *homelink.StorageConfig
+	if storageEnabled {
+		if flushInterval == 0 {
+			flushInterval = 10 * time.Second
+		}
+		if backupInterval == 0 {
+			backupInterval = 24 * time.Hour
+		}
+
+		storageConfig = &homelink.StorageConfig{
+			Enabled:        true,
+			DatabasePath:   databasePath,
+			RetentionDays:  retentionDays,
+			MaxEvents:      maxEvents,
+			BatchSize:      batchSize,
+			FlushInterval:  flushInterval,
+			BackupEnabled:  backupEnabled,
+			BackupPath:     backupPath,
+			BackupInterval: backupInterval,
+		}
+	}
+
+	// Create service with advanced features
+	service, err = homelink.NewAdvancedHomeLinkService(deviceID, deviceName, capabilities, securityConfig, mqttConfig, notificationConfig, storageConfig)
 
 	if err != nil {
 		log.Fatalf("Failed to create HomeLink service: %v", err)
@@ -179,6 +336,64 @@ func startHTTPAPI(service *homelink.HomeLinkService, port string) {
 		protocolModeHandler(w, r, service)
 	}))
 
+	// Advanced feature endpoints - MQTT
+	http.HandleFunc("/mqtt/status", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		mqttStatusHandler(w, r, service)
+	}))
+	http.HandleFunc("/mqtt/stats", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		mqttStatsHandler(w, r, service)
+	}))
+
+	// Advanced feature endpoints - Event Filtering
+	http.HandleFunc("/filtering/stats", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		filteringStatsHandler(w, r, service)
+	}))
+	http.HandleFunc("/filtering/filters", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			addFilterHandler(w, r, service)
+		} else {
+			getFiltersHandler(w, r, service)
+		}
+	}))
+	http.HandleFunc("/filtering/remove", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		removeFilterHandler(w, r, service)
+	}))
+
+	// Advanced feature endpoints - Notifications
+	http.HandleFunc("/notifications/stats", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		notificationStatsHandler(w, r, service)
+	}))
+	http.HandleFunc("/notifications/test", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		testNotificationHandler(w, r, service)
+	}))
+
+	// Advanced feature endpoints - Frigate Integration
+	http.HandleFunc("/frigate/cameras", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			addCameraHandler(w, r, service)
+		} else {
+			getCamerasHandler(w, r, service)
+		}
+	}))
+	http.HandleFunc("/frigate/automations", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" {
+			addAutomationHandler(w, r, service)
+		} else {
+			getAutomationsHandler(w, r, service)
+		}
+	}))
+
+	// Advanced feature endpoints - Event Storage
+	http.HandleFunc("/storage/stats", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		storageStatsHandler(w, r, service)
+	}))
+	http.HandleFunc("/storage/query", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		queryEventsHandler(w, r, service)
+	}))
+	http.HandleFunc("/storage/aggregates", authMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		eventAggregatesHandler(w, r, service)
+	}))
+
 	log.Printf("HTTP API server starting on port %s", port)
 	log.Printf("  GET  /dashboard            - Web dashboard")
 	log.Printf("  POST /publish              - Publish events")
@@ -192,6 +407,18 @@ func startHTTPAPI(service *homelink.HomeLinkService, port string) {
 	log.Printf("  GET  /health/summary       - Health summary")
 	log.Printf("  GET  /reliability/stats    - Reliability statistics")
 	log.Printf("  GET/POST /protocol/mode    - Protocol mode management")
+	log.Printf("  GET  /mqtt/status          - MQTT connection status")
+	log.Printf("  GET  /mqtt/stats           - MQTT bridge statistics")
+	log.Printf("  GET  /filtering/stats      - Event filtering statistics")
+	log.Printf("  GET/POST /filtering/filters - Event filter management")
+	log.Printf("  POST /filtering/remove     - Remove event filter")
+	log.Printf("  GET  /notifications/stats  - Notification statistics")
+	log.Printf("  POST /notifications/test   - Test notifications")
+	log.Printf("  GET/POST /frigate/cameras  - Frigate camera management")
+	log.Printf("  GET/POST /frigate/automations - Frigate automation rules")
+	log.Printf("  GET  /storage/stats        - Storage system statistics")
+	log.Printf("  POST /storage/query        - Query stored events")
+	log.Printf("  POST /storage/aggregates   - Get event aggregates")
 
 	if service.IsSecurityEnabled() {
 		log.Printf("  GET  /security/qr-code  - Generate QR pairing code")
@@ -985,6 +1212,503 @@ func protocolModeHandler(w http.ResponseWriter, r *http.Request, service *homeli
 			Message: "Only GET and POST methods allowed",
 		})
 	}
+}
+
+// Advanced Feature API Handlers
+
+// mqttStatusHandler returns MQTT connection status
+func mqttStatusHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Only GET method allowed",
+		})
+		return
+	}
+
+	connected := service.IsMQTTConnected()
+	status := "disconnected"
+	if connected {
+		status = "connected"
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":   true,
+		"connected": connected,
+		"status":    status,
+	})
+}
+
+// mqttStatsHandler returns MQTT bridge statistics
+func mqttStatsHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Only GET method allowed",
+		})
+		return
+	}
+
+	stats := service.GetMQTTStats()
+	
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"stats":   stats,
+	})
+}
+
+// filteringStatsHandler returns event filtering statistics
+func filteringStatsHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Only GET method allowed",
+		})
+		return
+	}
+
+	stats := service.GetFilteringStats()
+	
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"stats":   stats,
+	})
+}
+
+// addFilterHandler adds a new event filter
+func addFilterHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var filter homelink.EventFilter
+	if err := json.NewDecoder(r.Body).Decode(&filter); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Invalid JSON payload: " + err.Error(),
+		})
+		return
+	}
+
+	if err := service.AddEventFilter(filter); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Failed to add filter: " + err.Error(),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(APIResponse{
+		Success: true,
+		Message: "Event filter added successfully",
+	})
+}
+
+// getFiltersHandler returns all active filters
+func getFiltersHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// This would require adding a GetFilters method to the service
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"filters": []interface{}{}, // Placeholder
+		"message": "Filter listing not yet implemented",
+	})
+}
+
+// removeFilterHandler removes an event filter
+func removeFilterHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var removeReq struct {
+		Name string `json:"name"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&removeReq); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Invalid JSON payload: " + err.Error(),
+		})
+		return
+	}
+
+	if removeReq.Name == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Filter name is required",
+		})
+		return
+	}
+
+	success := service.RemoveEventFilter(removeReq.Name)
+	if !success {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Filter not found",
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(APIResponse{
+		Success: true,
+		Message: "Event filter removed successfully",
+	})
+}
+
+// notificationStatsHandler returns notification statistics
+func notificationStatsHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Only GET method allowed",
+		})
+		return
+	}
+
+	stats := service.GetNotificationStats()
+	
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"stats":   stats,
+	})
+}
+
+// testNotificationHandler sends a test notification
+func testNotificationHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var testReq struct {
+		Message string `json:"message"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&testReq); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Invalid JSON payload: " + err.Error(),
+		})
+		return
+	}
+
+	if testReq.Message == "" {
+		testReq.Message = "Test notification from HomeLink service"
+	}
+
+	// Create a test message
+	testMsg := &homelink.Message{
+		Type:      homelink.MSG_TEST,
+		DeviceID:  service.GetDeviceID(),
+		Timestamp: time.Now().Unix(),
+		Data:      map[string]interface{}{"message": testReq.Message},
+	}
+
+	// Send test notification
+	if err := service.SendTestNotification(testMsg); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Failed to send test notification: " + err.Error(),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(APIResponse{
+		Success: true,
+		Message: "Test notification sent successfully",
+	})
+}
+
+// addCameraHandler adds a new Frigate camera configuration
+func addCameraHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var camera homelink.CameraConfig
+	if err := json.NewDecoder(r.Body).Decode(&camera); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Invalid JSON payload: " + err.Error(),
+		})
+		return
+	}
+
+	if err := service.ConfigureFrigateCamera(camera); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Failed to add camera: " + err.Error(),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(APIResponse{
+		Success: true,
+		Message: "Frigate camera configured successfully",
+	})
+}
+
+// getCamerasHandler returns all configured cameras
+func getCamerasHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// This would require adding a GetCameras method to the service
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"cameras": []interface{}{}, // Placeholder
+		"message": "Camera listing not yet implemented",
+	})
+}
+
+// addAutomationHandler adds a new Frigate automation rule
+func addAutomationHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	var automation homelink.AutomationRule
+	if err := json.NewDecoder(r.Body).Decode(&automation); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Invalid JSON payload: " + err.Error(),
+		})
+		return
+	}
+
+	if err := service.AddFrigateAutomation(automation); err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Failed to add automation: " + err.Error(),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(APIResponse{
+		Success: true,
+		Message: "Frigate automation rule added successfully",
+	})
+}
+
+// getAutomationsHandler returns all automation rules
+func getAutomationsHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	// This would require adding a GetAutomations method to the service
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":     true,
+		"automations": []interface{}{}, // Placeholder
+		"message":     "Automation listing not yet implemented",
+	})
+}
+
+// Storage API Handlers
+
+// storageStatsHandler returns storage system statistics
+func storageStatsHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodGet {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Only GET method allowed",
+		})
+		return
+	}
+
+	if !service.IsStorageEnabled() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Event storage not enabled",
+		})
+		return
+	}
+
+	stats := service.GetStorageStats()
+	
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"stats":   stats,
+	})
+}
+
+// queryEventsHandler queries stored events
+func queryEventsHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Only POST method allowed",
+		})
+		return
+	}
+
+	if !service.IsStorageEnabled() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Event storage not enabled",
+		})
+		return
+	}
+
+	var query homelink.EventQuery
+	if err := json.NewDecoder(r.Body).Decode(&query); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Invalid JSON payload: " + err.Error(),
+		})
+		return
+	}
+
+	// Set default limit if not provided
+	if query.Limit == 0 {
+		query.Limit = 100
+	}
+	
+	// Enforce maximum limit to prevent performance issues
+	if query.Limit > 1000 {
+		query.Limit = 1000
+	}
+
+	events, err := service.QueryStoredEvents(query)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Failed to query events: " + err.Error(),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success": true,
+		"events":  events,
+		"count":   len(events),
+	})
+}
+
+// eventAggregatesHandler returns event aggregates
+func eventAggregatesHandler(w http.ResponseWriter, r *http.Request, service *homelink.HomeLinkService) {
+	w.Header().Set("Content-Type", "application/json")
+
+	if r.Method != http.MethodPost {
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Only POST method allowed",
+		})
+		return
+	}
+
+	if !service.IsStorageEnabled() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Event storage not enabled",
+		})
+		return
+	}
+
+	var aggregateReq struct {
+		StartTime string `json:"start_time"` // RFC3339 format
+		EndTime   string `json:"end_time"`   // RFC3339 format
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&aggregateReq); err != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Invalid JSON payload: " + err.Error(),
+		})
+		return
+	}
+
+	// Parse time strings
+	var startTime, endTime time.Time
+	var err error
+
+	if aggregateReq.StartTime != "" {
+		startTime, err = time.Parse(time.RFC3339, aggregateReq.StartTime)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(APIResponse{
+				Success: false,
+				Message: "Invalid start_time format. Use RFC3339 format.",
+			})
+			return
+		}
+	} else {
+		// Default to last 24 hours
+		startTime = time.Now().AddDate(0, 0, -1)
+	}
+
+	if aggregateReq.EndTime != "" {
+		endTime, err = time.Parse(time.RFC3339, aggregateReq.EndTime)
+		if err != nil {
+			w.WriteHeader(http.StatusBadRequest)
+			json.NewEncoder(w).Encode(APIResponse{
+				Success: false,
+				Message: "Invalid end_time format. Use RFC3339 format.",
+			})
+			return
+		}
+	} else {
+		endTime = time.Now()
+	}
+
+	aggregates, err := service.GetEventAggregates(startTime, endTime)
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(APIResponse{
+			Success: false,
+			Message: "Failed to get aggregates: " + err.Error(),
+		})
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"success":    true,
+		"aggregates": aggregates,
+		"count":      len(aggregates),
+		"time_range": map[string]interface{}{
+			"start": startTime.Format(time.RFC3339),
+			"end":   endTime.Format(time.RFC3339),
+		},
+	})
 }
 
 // getEnv gets an environment variable with a default value
