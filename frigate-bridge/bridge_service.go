@@ -55,7 +55,7 @@ func NewBridgeService(frigateClient *FrigateClient, homelinkClient *HomeLinkClie
 		homelinkClient:  homelinkClient,
 		transformer:     transformer,
 		config:          config,
-		lastPollTime:    time.Now().Add(-config.PollInterval), // Start polling from now
+		lastPollTime:    time.Now().Add(-10*time.Minute), // Start polling from 10 minutes ago for testing
 		processedEvents: make(map[string]bool),
 		stopChan:        make(chan bool),
 		healthChan:      make(chan bool, 1),

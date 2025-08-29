@@ -20,7 +20,7 @@ services:
       
       # Event Filtering
       - ENABLED_CAMERAS=${ENABLED_CAMERAS:-}
-      - ENABLED_EVENT_TYPES=person,car,bicycle,dog,cat
+      - ENABLED_EVENT_TYPES=car
       - MIN_CONFIDENCE=0.7
       
       # Advanced Options
