@@ -1,0 +1,80 @@
+version: '3.8'
+
+services:
+  frigate-bridge:
+    build: .
+    container_name: frigate-homelink-bridge
+    environment:
+      # Frigate Configuration
+      - FRIGATE_URL=http://frigate:5000
+      - FRIGATE_TIMEOUT=30s
+      
+      # HomeLink Configuration  
+      - HOMELINK_URL=http://homelink:8081
+      - HOMELINK_API_KEY=${HOMELINK_API_KEY:-}
+      - HOMELINK_TIMEOUT=30s
+      
+      # Bridge Configuration
+      - BRIDGE_ID=frigate-bridge
+      - POLL_INTERVAL=5s
+      
+      # Event Filtering
+      - ENABLED_CAMERAS=${ENABLED_CAMERAS:-}
+      - ENABLED_EVENT_TYPES=person,car,bicycle,dog,cat
+      - MIN_CONFIDENCE=0.7
+      
+      # Advanced Options
+      - MAX_EVENT_AGE=10m
+      - EVENT_BUFFER=100
+      - RETRY_ATTEMPTS=3
+      - RETRY_DELAY=5s
+      - LOG_LEVEL=INFO
+      - HEALTH_CHECK_PORT=8082
+    ports:
+      - "8082:8082"  # Health check and stats endpoint
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8082/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    networks:
+      - homelink-network
+
+  # Example Frigate service (remove if you have Frigate running elsewhere)
+  frigate:
+    image: ghcr.io/blakeblackshear/frigate:stable
+    container_name: frigate
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./frigate/config:/config
+      - ./frigate/storage:/media/frigate
+      - type: tmpfs
+        target: /tmp/cache
+        tmpfs:
+          size: 1000000000
+    environment:
+      FRIGATE_RTSP_PASSWORD: "password"
+    networks:
+      - homelink-network
+    # Remove this service if you have Frigate running elsewhere
+
+  # Example HomeLink service (remove if you have HomeLink running elsewhere)
+  homelink:
+    build: ../  # Assumes HomeLink is in parent directory
+    container_name: homelink-service
+    ports:
+      - "8081:8081"
+    environment:
+      - HOMELINK_DEVICE_ID=homelink-main
+      - HOMELINK_DEVICE_NAME=HomeLink Service
+      - HOMELINK_API_PORT=8081
+    networks:
+      - homelink-network
+    # Remove this service if you have HomeLink running elsewhere
+
+networks:
+  homelink-network:
+    driver: bridge
