@@ -79,6 +79,9 @@ func (fc *FrigateClient) GetRecentEvents(after time.Time, cameras []string, labe
 	
 	req.URL.RawQuery = q.Encode()
 
+	// Debug logging - print the full URL
+	log.Printf("DEBUG: Making API call to: %s", req.URL.String())
+
 	// Execute request
 	resp, err := fc.httpClient.Do(req)
 	if err != nil {
