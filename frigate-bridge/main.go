@@ -34,7 +34,7 @@ func main() {
 	homelinkClient := NewHomeLinkClient(config.HomeLinkURL, config.HomeLinkAPIKey, config.HomeLinkTimeout)
 
 	// Create event transformer
-	transformer := NewEventTransformer(config.BridgeID)
+	transformer := NewEventTransformer(config.BridgeID, frigateClient)
 
 	// Create bridge service
 	bridge := NewBridgeService(frigateClient, homelinkClient, transformer, config)

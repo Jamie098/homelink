@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/base64"
 	"fmt"
 	"log"
 	"time"
@@ -11,17 +12,20 @@ type HomeLinkEvent struct {
 	EventType   string            `json:"event_type"`
 	Description string            `json:"description"`
 	Data        map[string]string `json:"data"`
+	Snapshot    string            `json:"snapshot,omitempty"` // Base64-encoded snapshot image
 }
 
 // EventTransformer handles the transformation of Frigate events to HomeLink events
 type EventTransformer struct {
-	bridgeID string
+	bridgeID      string
+	frigateClient *FrigateClient
 }
 
 // NewEventTransformer creates a new event transformer
-func NewEventTransformer(bridgeID string) *EventTransformer {
+func NewEventTransformer(bridgeID string, frigateClient *FrigateClient) *EventTransformer {
 	return &EventTransformer{
-		bridgeID: bridgeID,
+		bridgeID:      bridgeID,
+		frigateClient: frigateClient,
 	}
 }
 
@@ -36,10 +40,22 @@ func (et *EventTransformer) TransformEvent(frigateEvent *FrigateEvent) *HomeLink
 	// Create data payload with relevant information
 	data := et.buildEventData(frigateEvent)
 	
+	// Fetch snapshot if available
+	var snapshot string
+	if frigateEvent.HasSnapshot {
+		if snapshotData, err := et.frigateClient.GetThumbnail(frigateEvent.ID); err == nil {
+			snapshot = base64.StdEncoding.EncodeToString(snapshotData)
+			log.Printf("Retrieved snapshot for event %s (%d bytes)", frigateEvent.ID, len(snapshotData))
+		} else {
+			log.Printf("Failed to retrieve snapshot for event %s: %v", frigateEvent.ID, err)
+		}
+	}
+	
 	return &HomeLinkEvent{
 		EventType:   eventType,
 		Description: description,
 		Data:        data,
+		Snapshot:    snapshot,
 	}
 }
 
@@ -64,16 +80,14 @@ func (et *EventTransformer) generateEventType(event *FrigateEvent) string {
 
 // generateDescription creates a human-readable description
 func (et *EventTransformer) generateDescription(event *FrigateEvent) string {
-	confidence := int(event.Score * 100)
-	
-	// Format the description based on event details
+	// Format the description based on event details (removed confidence)
 	if event.SubLabel != "" {
-		return fmt.Sprintf("%s (%s) detected on %s with %d%% confidence", 
-			et.capitalize(event.Label), event.SubLabel, event.Camera, confidence)
+		return fmt.Sprintf("%s (%s) detected on %s", 
+			et.capitalize(event.Label), event.SubLabel, event.Camera)
 	}
 	
-	return fmt.Sprintf("%s detected on %s with %d%% confidence", 
-		et.capitalize(event.Label), event.Camera, confidence)
+	return fmt.Sprintf("%s detected on %s", 
+		et.capitalize(event.Label), event.Camera)
 }
 
 // buildEventData creates the data map for the HomeLink event
@@ -84,12 +98,10 @@ func (et *EventTransformer) buildEventData(event *FrigateEvent) map[string]strin
 		"frigate_id":   event.ID,
 		"camera":       event.Camera,
 		"label":        event.Label,
-		"confidence":   fmt.Sprintf("%.2f", event.Score),
 		"start_time":   fmt.Sprintf("%.0f", event.StartTime),
 		"has_snapshot": fmt.Sprintf("%t", event.HasSnapshot),
 		"has_clip":     fmt.Sprintf("%t", event.HasClip),
 		"area":         fmt.Sprintf("%d", event.Area),
-		"top_score":    fmt.Sprintf("%.2f", event.Top_score),
 	}
 	
 	// Add sub-label if present
@@ -149,11 +161,7 @@ func (et *EventTransformer) ShouldProcessEvent(event *FrigateEvent, config *Conf
 		return false
 	}
 	
-	// Check confidence threshold
-	if event.Score < config.MinConfidence {
-		log.Printf("Skipping low confidence event: %s (%.2f < %.2f)", event.ID, event.Score, config.MinConfidence)
-		return false
-	}
+	// Note: Confidence filtering removed - we want all detected objects
 	
 	// Check camera filter
 	if len(config.EnabledCameras) > 0 {
