@@ -24,17 +24,17 @@ type Config struct {
 	PollInterval time.Duration `json:"poll_interval"`
 
 	// Event filtering
-	EnabledCameras   []string `json:"enabled_cameras"`
+	EnabledCameras    []string `json:"enabled_cameras"`
 	EnabledEventTypes []string `json:"enabled_event_types"`
-	MinConfidence    float64  `json:"min_confidence"`
-	
+	MinConfidence     float64  `json:"min_confidence"`
+
 	// Advanced options
-	MaxEventAge      time.Duration `json:"max_event_age"`
-	EventBuffer      int          `json:"event_buffer"`
-	RetryAttempts    int          `json:"retry_attempts"`
-	RetryDelay       time.Duration `json:"retry_delay"`
-	LogLevel         string       `json:"log_level"`
-	HealthCheckPort  int          `json:"health_check_port"`
+	MaxEventAge     time.Duration `json:"max_event_age"`
+	EventBuffer     int           `json:"event_buffer"`
+	RetryAttempts   int           `json:"retry_attempts"`
+	RetryDelay      time.Duration `json:"retry_delay"`
+	LogLevel        string        `json:"log_level"`
+	HealthCheckPort int           `json:"health_check_port"`
 }
 
 // NewConfig creates a new configuration from environment variables
@@ -73,31 +73,31 @@ func (c *Config) Validate() error {
 	if c.FrigateURL == "" {
 		return fmt.Errorf("FRIGATE_URL is required")
 	}
-	
+
 	if c.HomeLinkURL == "" {
 		return fmt.Errorf("HOMELINK_URL is required")
 	}
-	
+
 	if c.BridgeID == "" {
 		return fmt.Errorf("BRIDGE_ID is required")
 	}
-	
+
 	if c.PollInterval < time.Second {
 		return fmt.Errorf("POLL_INTERVAL must be at least 1 second")
 	}
-	
+
 	if c.MinConfidence < 0 || c.MinConfidence > 1 {
 		return fmt.Errorf("MIN_CONFIDENCE must be between 0 and 1")
 	}
-	
+
 	if c.MaxEventAge < time.Minute {
 		return fmt.Errorf("MAX_EVENT_AGE must be at least 1 minute")
 	}
-	
+
 	if c.EventBuffer < 1 {
 		return fmt.Errorf("EVENT_BUFFER must be at least 1")
 	}
-	
+
 	if c.RetryAttempts < 0 {
 		return fmt.Errorf("RETRY_ATTEMPTS must be >= 0")
 	}
@@ -146,7 +146,7 @@ func parseStringSlice(key string, defaultValue []string) []string {
 	if value == "" {
 		return defaultValue
 	}
-	
+
 	// Simple comma-separated parsing
 	var result []string
 	for _, item := range strings.Split(value, ",") {
@@ -155,10 +155,10 @@ func parseStringSlice(key string, defaultValue []string) []string {
 			result = append(result, item)
 		}
 	}
-	
+
 	if len(result) == 0 {
 		return defaultValue
 	}
-	
+
 	return result
 }

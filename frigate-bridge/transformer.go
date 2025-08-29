@@ -13,6 +13,7 @@ type HomeLinkEvent struct {
 	Description string            `json:"description"`
 	Data        map[string]string `json:"data"`
 	Snapshot    string            `json:"snapshot,omitempty"` // Base64-encoded snapshot image
+	Clip        string            `json:"clip,omitempty"`     // Base64-encoded video clip
 }
 
 // EventTransformer handles the transformation of Frigate events to HomeLink events
@@ -33,29 +34,49 @@ func NewEventTransformer(bridgeID string, frigateClient *FrigateClient) *EventTr
 func (et *EventTransformer) TransformEvent(frigateEvent *FrigateEvent) *HomeLinkEvent {
 	// Generate event type based on Frigate event data
 	eventType := et.generateEventType(frigateEvent)
-	
+
 	// Generate human-readable description
 	description := et.generateDescription(frigateEvent)
-	
-	// Create data payload with relevant information
-	data := et.buildEventData(frigateEvent)
-	
-	// Fetch snapshot if available
+
+	// Fetch snapshot - always attempt regardless of HasSnapshot flag as it can be unreliable
 	var snapshot string
-	if frigateEvent.HasSnapshot {
-		if snapshotData, err := et.frigateClient.GetThumbnail(frigateEvent.ID); err == nil {
+	var hasActualSnapshot bool
+	if snapshotData, err := et.frigateClient.GetThumbnail(frigateEvent.ID); err == nil {
+		if len(snapshotData) > 0 {
 			snapshot = base64.StdEncoding.EncodeToString(snapshotData)
+			hasActualSnapshot = true
 			log.Printf("Retrieved snapshot for event %s (%d bytes)", frigateEvent.ID, len(snapshotData))
 		} else {
-			log.Printf("Failed to retrieve snapshot for event %s: %v", frigateEvent.ID, err)
+			log.Printf("Retrieved empty snapshot for event %s", frigateEvent.ID)
 		}
+	} else {
+		log.Printf("No snapshot available for event %s: %v", frigateEvent.ID, err)
 	}
-	
+
+	// Fetch clip - always attempt regardless of HasClip flag as it can be unreliable
+	var clip string
+	var hasActualClip bool
+	if clipData, err := et.frigateClient.GetClip(frigateEvent.ID); err == nil {
+		if len(clipData) > 0 {
+			clip = base64.StdEncoding.EncodeToString(clipData)
+			hasActualClip = true
+			log.Printf("Retrieved clip for event %s (%d bytes)", frigateEvent.ID, len(clipData))
+		} else {
+			log.Printf("Retrieved empty clip for event %s", frigateEvent.ID)
+		}
+	} else {
+		log.Printf("No clip available for event %s: %v", frigateEvent.ID, err)
+	}
+
+	// Create data payload with relevant information - using actual availability
+	data := et.buildEventData(frigateEvent, hasActualSnapshot, hasActualClip)
+
 	return &HomeLinkEvent{
 		EventType:   eventType,
 		Description: description,
 		Data:        data,
 		Snapshot:    snapshot,
+		Clip:        clip,
 	}
 }
 
@@ -82,16 +103,16 @@ func (et *EventTransformer) generateEventType(event *FrigateEvent) string {
 func (et *EventTransformer) generateDescription(event *FrigateEvent) string {
 	// Format the description based on event details (removed confidence)
 	if event.SubLabel != "" {
-		return fmt.Sprintf("%s (%s) detected on %s", 
+		return fmt.Sprintf("%s (%s) detected on %s",
 			et.capitalize(event.Label), event.SubLabel, event.Camera)
 	}
-	
-	return fmt.Sprintf("%s detected on %s", 
+
+	return fmt.Sprintf("%s detected on %s",
 		et.capitalize(event.Label), event.Camera)
 }
 
 // buildEventData creates the data map for the HomeLink event
-func (et *EventTransformer) buildEventData(event *FrigateEvent) map[string]string {
+func (et *EventTransformer) buildEventData(event *FrigateEvent, hasSnapshot bool, hasClip bool) map[string]string {
 	data := map[string]string{
 		"source":       "frigate",
 		"bridge_id":    et.bridgeID,
@@ -99,16 +120,16 @@ func (et *EventTransformer) buildEventData(event *FrigateEvent) map[string]strin
 		"camera":       event.Camera,
 		"label":        event.Label,
 		"start_time":   fmt.Sprintf("%.0f", event.StartTime),
-		"has_snapshot": fmt.Sprintf("%t", event.HasSnapshot),
-		"has_clip":     fmt.Sprintf("%t", event.HasClip),
+		"has_snapshot": fmt.Sprintf("%t", hasSnapshot),
+		"has_clip":     fmt.Sprintf("%t", hasClip),
 		"area":         fmt.Sprintf("%d", event.Area),
 	}
-	
+
 	// Add sub-label if present
 	if event.SubLabel != "" {
 		data["sub_label"] = event.SubLabel
 	}
-	
+
 	// Add end time if event is complete
 	if event.EndTime != nil {
 		data["end_time"] = fmt.Sprintf("%.0f", *event.EndTime)
@@ -117,7 +138,7 @@ func (et *EventTransformer) buildEventData(event *FrigateEvent) map[string]strin
 	} else {
 		data["status"] = "ongoing"
 	}
-	
+
 	// Add zones if present
 	if len(event.Zones) > 0 {
 		zones := ""
@@ -129,7 +150,7 @@ func (et *EventTransformer) buildEventData(event *FrigateEvent) map[string]strin
 		}
 		data["zones"] = zones
 	}
-	
+
 	// Add bounding box information if present
 	if len(event.Box) >= 4 {
 		data["box_x"] = fmt.Sprintf("%.0f", event.Box[0])
@@ -137,19 +158,19 @@ func (et *EventTransformer) buildEventData(event *FrigateEvent) map[string]strin
 		data["box_width"] = fmt.Sprintf("%.0f", event.Box[2])
 		data["box_height"] = fmt.Sprintf("%.0f", event.Box[3])
 	}
-	
+
 	// Add HomeLink-specific timestamp
 	data["homelink_timestamp"] = fmt.Sprintf("%d", time.Now().Unix())
-	
-	// Add URL to view the event in Frigate (if thumbnails are available)
-	if event.HasSnapshot {
+
+	// Add URL to view the event in Frigate (only if we actually have the data)
+	if hasSnapshot {
 		data["frigate_thumbnail_url"] = fmt.Sprintf("/api/events/%s/thumbnail.jpg", event.ID)
 	}
-	
-	if event.HasClip {
+
+	if hasClip {
 		data["frigate_clip_url"] = fmt.Sprintf("/api/events/%s/clip.mp4", event.ID)
 	}
-	
+
 	return data
 }
 
@@ -160,9 +181,9 @@ func (et *EventTransformer) ShouldProcessEvent(event *FrigateEvent, config *Conf
 		log.Printf("Skipping false positive event: %s", event.ID)
 		return false
 	}
-	
+
 	// Note: Confidence filtering removed - we want all detected objects
-	
+
 	// Check camera filter
 	if len(config.EnabledCameras) > 0 {
 		cameraEnabled := false
@@ -177,7 +198,7 @@ func (et *EventTransformer) ShouldProcessEvent(event *FrigateEvent, config *Conf
 			return false
 		}
 	}
-	
+
 	// Check event type filter
 	if len(config.EnabledEventTypes) > 0 {
 		labelEnabled := false
@@ -192,14 +213,14 @@ func (et *EventTransformer) ShouldProcessEvent(event *FrigateEvent, config *Conf
 			return false
 		}
 	}
-	
+
 	// Check event age
 	eventTime := time.Unix(int64(event.StartTime), 0)
 	if time.Since(eventTime) > config.MaxEventAge {
 		log.Printf("Skipping old event: %s (age: %v)", event.ID, time.Since(eventTime))
 		return false
 	}
-	
+
 	return true
 }
 
@@ -217,17 +238,17 @@ func (et *EventTransformer) GetEventPriority(event *FrigateEvent) string {
 	if event.Label == "person" && event.Score > 0.9 {
 		return "high"
 	}
-	
+
 	// High priority for vehicles in specific zones (if configured)
 	if (event.Label == "car" || event.Label == "truck") && event.Score > 0.8 {
 		return "high"
 	}
-	
+
 	// Normal priority for most events
 	if event.Score > 0.8 {
 		return "normal"
 	}
-	
+
 	// Low priority for lower confidence events
 	return "low"
 }

@@ -11,23 +11,23 @@ import (
 
 // FrigateEvent represents an event from Frigate's API
 type FrigateEvent struct {
-	ID          string                 `json:"id"`
-	Label       string                 `json:"label"`
-	Camera      string                 `json:"camera"`
-	StartTime   float64                `json:"start_time"`
-	EndTime     *float64               `json:"end_time,omitempty"`
-	Score       float64                `json:"score"`
-	Area        int                    `json:"area"`
-	Box         []float64              `json:"box,omitempty"`
-	Region      []float64              `json:"region,omitempty"`
-	HasSnapshot bool                   `json:"has_snapshot"`
-	HasClip     bool                   `json:"has_clip"`
-	Thumbnail   string                 `json:"thumbnail,omitempty"`
-	Data        map[string]interface{} `json:"data,omitempty"`
-	Zones       []string               `json:"zones,omitempty"`
-	SubLabel    string                 `json:"sub_label,omitempty"`
-	Top_score   float64                `json:"top_score"`
-	False_positive bool               `json:"false_positive"`
+	ID             string                 `json:"id"`
+	Label          string                 `json:"label"`
+	Camera         string                 `json:"camera"`
+	StartTime      float64                `json:"start_time"`
+	EndTime        *float64               `json:"end_time,omitempty"`
+	Score          float64                `json:"score"`
+	Area           int                    `json:"area"`
+	Box            []float64              `json:"box,omitempty"`
+	Region         []float64              `json:"region,omitempty"`
+	HasSnapshot    bool                   `json:"has_snapshot"`
+	HasClip        bool                   `json:"has_clip"`
+	Thumbnail      string                 `json:"thumbnail,omitempty"`
+	Data           map[string]interface{} `json:"data,omitempty"`
+	Zones          []string               `json:"zones,omitempty"`
+	SubLabel       string                 `json:"sub_label,omitempty"`
+	Top_score      float64                `json:"top_score"`
+	False_positive bool                   `json:"false_positive"`
 }
 
 // FrigateEventsResponse represents the response from Frigate's events API
@@ -62,21 +62,21 @@ func (fc *FrigateClient) GetRecentEvents(after time.Time, cameras []string, labe
 	q := req.URL.Query()
 	q.Set("after", fmt.Sprintf("%.0f", float64(after.Unix())))
 	q.Set("include_thumbnails", "1")
-	
+
 	// Filter by cameras if specified
 	if len(cameras) > 0 {
 		for _, camera := range cameras {
 			q.Add("camera", camera)
 		}
 	}
-	
+
 	// Filter by labels if specified
 	if len(labels) > 0 {
 		for _, label := range labels {
 			q.Add("label", label)
 		}
 	}
-	
+
 	req.URL.RawQuery = q.Encode()
 
 	// Debug logging - print the full URL
@@ -108,7 +108,7 @@ func (fc *FrigateClient) GetRecentEvents(after time.Time, cameras []string, labe
 // GetEvent retrieves a specific event by ID
 func (fc *FrigateClient) GetEvent(eventID string) (*FrigateEvent, error) {
 	url := fmt.Sprintf("%s/api/events/%s", fc.baseURL, eventID)
-	
+
 	resp, err := fc.httpClient.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get event: %w", err)
@@ -134,7 +134,7 @@ func (fc *FrigateClient) GetEvent(eventID string) (*FrigateEvent, error) {
 // GetStats retrieves stats from Frigate
 func (fc *FrigateClient) GetStats() (map[string]interface{}, error) {
 	url := fmt.Sprintf("%s/api/stats", fc.baseURL)
-	
+
 	resp, err := fc.httpClient.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get stats: %w", err)
@@ -157,7 +157,7 @@ func (fc *FrigateClient) GetStats() (map[string]interface{}, error) {
 // HealthCheck performs a health check on the Frigate API
 func (fc *FrigateClient) HealthCheck() error {
 	url := fmt.Sprintf("%s/api/version", fc.baseURL)
-	
+
 	resp, err := fc.httpClient.Get(url)
 	if err != nil {
 		return fmt.Errorf("frigate health check failed: %w", err)
@@ -174,7 +174,7 @@ func (fc *FrigateClient) HealthCheck() error {
 // GetThumbnail retrieves a thumbnail for an event
 func (fc *FrigateClient) GetThumbnail(eventID string) ([]byte, error) {
 	url := fmt.Sprintf("%s/api/events/%s/thumbnail.jpg", fc.baseURL, eventID)
-	
+
 	resp, err := fc.httpClient.Get(url)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get thumbnail: %w", err)
@@ -182,7 +182,11 @@ func (fc *FrigateClient) GetThumbnail(eventID string) ([]byte, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("thumbnail request failed with status: %d", resp.StatusCode)
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("thumbnail not found (404)")
+		}
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("thumbnail request failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
 	thumbnail, err := io.ReadAll(resp.Body)
@@ -191,4 +195,30 @@ func (fc *FrigateClient) GetThumbnail(eventID string) ([]byte, error) {
 	}
 
 	return thumbnail, nil
+}
+
+// GetClip retrieves a video clip for an event
+func (fc *FrigateClient) GetClip(eventID string) ([]byte, error) {
+	url := fmt.Sprintf("%s/api/events/%s/clip.mp4", fc.baseURL, eventID)
+
+	resp, err := fc.httpClient.Get(url)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get clip: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		if resp.StatusCode == http.StatusNotFound {
+			return nil, fmt.Errorf("clip not found (404)")
+		}
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("clip request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	clip, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read clip: %w", err)
+	}
+
+	return clip, nil
 }
