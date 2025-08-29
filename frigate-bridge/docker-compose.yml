@@ -10,7 +10,7 @@ services:
       - FRIGATE_TIMEOUT=30s
       
       # HomeLink Configuration  
-      - HOMELINK_URL=http://homelink:8081
+      - HOMELINK_URL=http://192.168.1.4:8081
       - HOMELINK_API_KEY=${HOMELINK_API_KEY:-}
       - HOMELINK_TIMEOUT=30s
       
@@ -21,7 +21,7 @@ services:
       # Event Filtering
       - ENABLED_CAMERAS=${ENABLED_CAMERAS:-}
       - ENABLED_EVENT_TYPES=car
-      - MIN_CONFIDENCE=0.7
+      - MIN_CONFIDENCE=0.0
       
       # Advanced Options
       - MAX_EVENT_AGE=10m
@@ -65,14 +65,11 @@ services:
   homelink:
     build: ../  # Assumes HomeLink is in parent directory
     container_name: homelink-service
-    ports:
-      - "8081:8081"
+    network_mode: host
     environment:
       - HOMELINK_DEVICE_ID=homelink-main
       - HOMELINK_DEVICE_NAME=HomeLink Service
       - HOMELINK_API_PORT=8081
-    networks:
-      - homelink-network
     # Remove this service if you have HomeLink running elsewhere
 
 networks:
