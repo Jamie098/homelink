@@ -133,6 +133,9 @@ func (bs *BridgeService) pollForEvents() {
 	bs.stats.mutex.Unlock()
 
 	log.Printf("Polling Frigate for new events since %s", bs.lastPollTime.Format(time.RFC3339))
+	log.Printf("DEBUG: Enabled cameras: %v", bs.config.EnabledCameras)
+	log.Printf("DEBUG: Enabled event types: %v", bs.config.EnabledEventTypes)
+	log.Printf("DEBUG: Max event age: %v", bs.config.MaxEventAge)
 
 	// Get recent events from Frigate
 	events, err := bs.frigateClient.GetRecentEvents(

@@ -102,6 +102,32 @@ func (fc *FrigateClient) GetRecentEvents(after time.Time, cameras []string, labe
 	}
 
 	log.Printf("Retrieved %d events from Frigate", len(events))
+	
+	// Debug: Also try getting recent events without time filter to see if Frigate has any events at all
+	if len(events) == 0 {
+		debugReq, _ := http.NewRequest("GET", fmt.Sprintf("%s/api/events", fc.baseURL), nil)
+		debugQ := debugReq.URL.Query()
+		debugQ.Set("limit", "5")
+		debugReq.URL.RawQuery = debugQ.Encode()
+		
+		log.Printf("DEBUG: Checking if Frigate has any events at all: %s", debugReq.URL.String())
+		debugResp, err := fc.httpClient.Do(debugReq)
+		if err == nil && debugResp.StatusCode == http.StatusOK {
+			var debugEvents FrigateEventsResponse
+			if json.NewDecoder(debugResp.Body).Decode(&debugEvents) == nil {
+				log.Printf("DEBUG: Frigate has %d total recent events", len(debugEvents))
+				for i, event := range debugEvents {
+					if i < 3 { // Show first 3 events
+						log.Printf("DEBUG: Event %d: ID=%s, Label=%s, Camera=%s, Time=%s", 
+							i+1, event.ID, event.Label, event.Camera, 
+							time.Unix(int64(event.StartTime), 0).Format(time.RFC3339))
+					}
+				}
+			}
+			debugResp.Body.Close()
+		}
+	}
+	
 	return events, nil
 }
 
