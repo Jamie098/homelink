@@ -154,19 +154,39 @@ func (bs *BridgeService) pollForEvents() {
 	bs.stats.LastSuccessfulPoll = time.Now()
 	bs.stats.mutex.Unlock()
 
-	// Process each event
+	// Process each event and track the latest event time
+	var latestEventTime time.Time
+	processedCount := 0
+	
 	for _, event := range events {
-		bs.processEvent(&event)
+		if bs.processEvent(&event) {
+			processedCount++
+		}
+		
+		// Track the latest event time
+		eventTime := time.Unix(int64(event.StartTime), 0)
+		if eventTime.After(latestEventTime) {
+			latestEventTime = eventTime
+		}
 	}
 
-	// Update last poll time
-	bs.lastPollTime = time.Now()
+	// Update last poll time - use the latest event time if we processed any events,
+	// otherwise move forward but with a small buffer to avoid missing events due to timing
+	if !latestEventTime.IsZero() {
+		// Use the latest event time plus a small buffer
+		bs.lastPollTime = latestEventTime.Add(1 * time.Second)
+		log.Printf("Updated lastPollTime to latest event time + buffer: %s", bs.lastPollTime.Format(time.RFC3339))
+	} else {
+		// No events processed, move forward but leave a buffer for potential timing issues
+		bs.lastPollTime = time.Now().Add(-10 * time.Second)
+		log.Printf("No events found, updated lastPollTime with 10s buffer: %s", bs.lastPollTime.Format(time.RFC3339))
+	}
 
-	log.Printf("Polling complete, processed %d events", len(events))
+	log.Printf("Polling complete, processed %d events", processedCount)
 }
 
-// processEvent handles a single Frigate event
-func (bs *BridgeService) processEvent(frigateEvent *FrigateEvent) {
+// processEvent handles a single Frigate event and returns true if successfully processed
+func (bs *BridgeService) processEvent(frigateEvent *FrigateEvent) bool {
 	bs.incrementEventsProcessed()
 
 	// Check if we've already processed this event
@@ -176,7 +196,7 @@ func (bs *BridgeService) processEvent(frigateEvent *FrigateEvent) {
 
 	if alreadyProcessed {
 		log.Printf("Skipping already processed event: %s", frigateEvent.ID)
-		return
+		return false
 	}
 
 	// Check if event should be processed based on filters
@@ -184,7 +204,7 @@ func (bs *BridgeService) processEvent(frigateEvent *FrigateEvent) {
 		bs.incrementEventsFiltered()
 		// Still mark as processed to avoid reprocessing
 		bs.markEventProcessed(frigateEvent.ID)
-		return
+		return false
 	}
 
 	// Transform the event
@@ -208,7 +228,7 @@ func (bs *BridgeService) processEvent(frigateEvent *FrigateEvent) {
 
 		// Implement retry logic
 		bs.retryPublishEvent(homelinkEvent, priority, 1)
-		return
+		return false
 	}
 
 	// Mark as processed and increment success counter
@@ -216,6 +236,7 @@ func (bs *BridgeService) processEvent(frigateEvent *FrigateEvent) {
 	bs.incrementEventsPublished()
 
 	log.Printf("Successfully processed and published event: %s (%s)", frigateEvent.ID, homelinkEvent.EventType)
+	return true
 }
 
 // retryPublishEvent implements retry logic for failed event publishing
