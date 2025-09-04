@@ -77,6 +77,10 @@ func (hlc *HomeLinkClient) publishEventWithRetry(event *HomeLinkEvent, reliable 
 		return fmt.Errorf("failed to marshal event: %w", err)
 	}
 
+	// Debug: Log snapshot data info before sending
+	log.Printf("DEBUG: Publishing event %s with snapshot length: %d, clip length: %d", 
+		event.EventType, len(event.Snapshot), len(event.Clip))
+
 	// Create request
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(jsonData))
 	if err != nil {

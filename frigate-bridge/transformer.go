@@ -12,8 +12,8 @@ type HomeLinkEvent struct {
 	EventType   string            `json:"event_type"`
 	Description string            `json:"description"`
 	Data        map[string]string `json:"data"`
-	Snapshot    string            `json:"snapshot,omitempty"` // Base64-encoded snapshot image
-	Clip        string            `json:"clip,omitempty"`     // Base64-encoded video clip
+	Snapshot    string            `json:"snapshot"` // Base64-encoded snapshot image
+	Clip        string            `json:"clip"`     // Base64-encoded video clip
 }
 
 // EventTransformer handles the transformation of Frigate events to HomeLink events
@@ -89,13 +89,19 @@ func (et *EventTransformer) TransformEvent(frigateEvent *FrigateEvent) *HomeLink
 	// Create data payload with relevant information - using actual availability
 	data := et.buildEventData(frigateEvent, hasActualSnapshot, hasActualClip)
 
-	return &HomeLinkEvent{
+	homelinkEvent := &HomeLinkEvent{
 		EventType:   eventType,
 		Description: description,
 		Data:        data,
 		Snapshot:    snapshot,
 		Clip:        clip,
 	}
+
+	// Debug: Log what we're about to return
+	log.Printf("DEBUG: Created HomeLinkEvent - EventType: %s, Snapshot length: %d, Clip length: %d", 
+		homelinkEvent.EventType, len(homelinkEvent.Snapshot), len(homelinkEvent.Clip))
+
+	return homelinkEvent
 }
 
 // generateEventType creates an appropriate event type for HomeLink
