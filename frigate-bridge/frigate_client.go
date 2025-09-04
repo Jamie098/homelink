@@ -123,6 +123,12 @@ func (fc *FrigateClient) GetRecentEvents(after time.Time, cameras []string, labe
 							time.Unix(int64(event.StartTime), 0).Format(time.RFC3339))
 					}
 				}
+				
+				// If we have recent events but missed them, return them for processing
+				if len(debugEvents) > 0 {
+					log.Printf("DEBUG: Returning recent events for processing to catch up")
+					events = debugEvents
+				}
 			}
 			debugResp.Body.Close()
 		}
