@@ -172,29 +172,57 @@ func (fc *FrigateClient) HealthCheck() error {
 }
 
 // GetThumbnail retrieves a thumbnail for an event
+// Tries multiple endpoints and formats for maximum compatibility
 func (fc *FrigateClient) GetThumbnail(eventID string) ([]byte, error) {
-	url := fmt.Sprintf("%s/api/events/%s/thumbnail.jpg", fc.baseURL, eventID)
-
-	resp, err := fc.httpClient.Get(url)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get thumbnail: %w", err)
+	// List of possible endpoints to try in order of preference
+	endpoints := []string{
+		fmt.Sprintf("%s/api/events/%s/snapshot.jpg", fc.baseURL, eventID),      // Primary snapshot endpoint
+		fmt.Sprintf("%s/api/events/%s/thumbnail.jpg", fc.baseURL, eventID),     // Legacy thumbnail endpoint
+		fmt.Sprintf("%s/api/events/%s/snapshot.webp", fc.baseURL, eventID),     // WebP format support
+		fmt.Sprintf("%s/api/events/%s/thumbnail.webp", fc.baseURL, eventID),    // WebP thumbnail format
 	}
-	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		if resp.StatusCode == http.StatusNotFound {
-			return nil, fmt.Errorf("thumbnail not found (404)")
+	var lastErr error
+	for i, url := range endpoints {
+		log.Printf("Trying snapshot endpoint %d/%d: %s", i+1, len(endpoints), url)
+		
+		resp, err := fc.httpClient.Get(url)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to get thumbnail from %s: %w", url, err)
+			continue
 		}
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("thumbnail request failed with status %d: %s", resp.StatusCode, string(body))
+		
+		if resp.StatusCode == http.StatusOK {
+			thumbnail, err := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			if err != nil {
+				lastErr = fmt.Errorf("failed to read thumbnail from %s: %w", url, err)
+				continue
+			}
+			
+			if len(thumbnail) > 0 {
+				log.Printf("Successfully retrieved thumbnail from %s (%d bytes)", url, len(thumbnail))
+				return thumbnail, nil
+			} else {
+				log.Printf("Empty thumbnail from %s", url)
+				lastErr = fmt.Errorf("empty thumbnail from %s", url)
+				continue
+			}
+		}
+		
+		// Log the specific error for debugging
+		if resp.StatusCode == http.StatusNotFound {
+			log.Printf("Thumbnail not found (404) at %s", url)
+		} else {
+			body, _ := io.ReadAll(resp.Body)
+			log.Printf("Thumbnail request failed with status %d at %s: %s", resp.StatusCode, url, string(body))
+		}
+		resp.Body.Close()
+		
+		lastErr = fmt.Errorf("thumbnail request failed with status %d from %s", resp.StatusCode, url)
 	}
 
-	thumbnail, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read thumbnail: %w", err)
-	}
-
-	return thumbnail, nil
+	return nil, fmt.Errorf("failed to retrieve thumbnail from any endpoint: %w", lastErr)
 }
 
 // GetClip retrieves a video clip for an event

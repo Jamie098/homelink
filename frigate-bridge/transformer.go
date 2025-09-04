@@ -39,18 +39,36 @@ func (et *EventTransformer) TransformEvent(frigateEvent *FrigateEvent) *HomeLink
 	description := et.generateDescription(frigateEvent)
 
 	// Fetch snapshot - always attempt regardless of HasSnapshot flag as it can be unreliable
+	// Add a small retry mechanism since snapshots may take time to generate
 	var snapshot string
 	var hasActualSnapshot bool
-	if snapshotData, err := et.frigateClient.GetThumbnail(frigateEvent.ID); err == nil {
-		if len(snapshotData) > 0 {
-			snapshot = base64.StdEncoding.EncodeToString(snapshotData)
-			hasActualSnapshot = true
-			log.Printf("Retrieved snapshot for event %s (%d bytes)", frigateEvent.ID, len(snapshotData))
+	
+	maxRetries := 3
+	retryDelay := time.Second * 2
+	
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if snapshotData, err := et.frigateClient.GetThumbnail(frigateEvent.ID); err == nil {
+			if len(snapshotData) > 0 {
+				snapshot = base64.StdEncoding.EncodeToString(snapshotData)
+				hasActualSnapshot = true
+				log.Printf("Retrieved snapshot for event %s (%d bytes) on attempt %d", frigateEvent.ID, len(snapshotData), attempt)
+				break
+			} else {
+				log.Printf("Retrieved empty snapshot for event %s on attempt %d", frigateEvent.ID, attempt)
+			}
 		} else {
-			log.Printf("Retrieved empty snapshot for event %s", frigateEvent.ID)
+			log.Printf("No snapshot available for event %s on attempt %d: %v", frigateEvent.ID, attempt, err)
 		}
-	} else {
-		log.Printf("No snapshot available for event %s: %v", frigateEvent.ID, err)
+		
+		// Wait before retrying, but not on the last attempt
+		if attempt < maxRetries {
+			log.Printf("Waiting %v before retry %d for snapshot of event %s", retryDelay, attempt+1, frigateEvent.ID)
+			time.Sleep(retryDelay)
+		}
+	}
+	
+	if !hasActualSnapshot {
+		log.Printf("Failed to retrieve snapshot for event %s after %d attempts", frigateEvent.ID, maxRetries)
 	}
 
 	// Fetch clip - always attempt regardless of HasClip flag as it can be unreliable
